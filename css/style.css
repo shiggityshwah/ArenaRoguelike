@@ -1,0 +1,240 @@
+@import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap");
+body {
+  margin: 0;
+  overflow: hidden;
+}
+canvas {
+  display: block;
+}
+#prompt {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: white;
+  font-family: sans-serif;
+  font-size: 24px;
+  display: none;
+}
+#score {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: white;
+  font-family: "Press Start 2P", cursive;
+  font-size: 72px;
+}
+
+@keyframes score-animation {
+  0% {
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    transform: translateX(-50%) scale(1.5);
+    color: #ffc107;
+  }
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+.score-animated {
+  animation: score-animation 0.3s;
+}
+
+@keyframes health-bar-shake {
+  0% {
+    transform: translateX(-50%) scaleX(1);
+  }
+  25% {
+    transform: translateX(-52%) scaleX(1.05);
+  }
+  50% {
+    transform: translateX(-48%) scaleX(1.05);
+  }
+  75% {
+    transform: translateX(-52%) scaleX(1.05);
+  }
+  100% {
+    transform: translateX(-50%) scaleX(1);
+  }
+}
+
+@keyframes spacebar-press {
+  from {
+    transform: translateX(-50%) scale(1);
+  }
+  to {
+    transform: translateX(-50%) scale(0.95);
+  }
+}
+
+.spacebar-active {
+  animation: spacebar-press 0.2s forwards;
+}
+
+.health-bar-shaking {
+  animation: health-bar-shake 0.3s;
+}
+
+#health-bar-container {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 600px;
+  height: 40px;
+  border: 2px solid white;
+  box-shadow: 0 0 10px white, 0 0 20px white, 0 0 30px #00bfff;
+}
+
+#health-bar {
+  width: 100%;
+  height: 100%;
+  background-color: red;
+  transition: width 0.2s ease;
+}
+
+#level-up-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(16, 16, 16, 0.85);
+  display: none; /* Hidden by default */
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+  font-family: "Press Start 2P", cursive;
+}
+
+#level-up-popup {
+  background: rgba(30, 30, 30, 0.9);
+  border: 3px solid #00bfff;
+  box-shadow: 0 0 20px #00bfff;
+  padding: 30px;
+  text-align: center;
+  color: white;
+  transform: scale(0);
+  transition: transform 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+  width: 90%;
+  max-width: 500px;
+  position: relative;
+}
+
+#level-up-overlay.visible {
+  display: flex;
+}
+
+#level-up-overlay.visible #level-up-popup {
+  transform: scale(1);
+}
+
+#level-up-popup h2 {
+  color: gold;
+  text-shadow: 0 0 10px gold;
+  margin-top: 0;
+}
+
+#upgrade-options {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.upgrade-button {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 3px solid white;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  transition: transform 0.1s, box-shadow 0.2s;
+  font-size: 10px;
+  padding: 5px;
+  box-sizing: border-box;
+}
+
+.upgrade-button:hover {
+  transform: scale(1.1);
+}
+
+.upgrade-button .stat-name {
+  font-weight: bold;
+}
+
+.upgrade-button .stat-value {
+  margin-top: 5px;
+  font-size: 12px;
+}
+
+#skip-button-container {
+  width: 80px;
+  height: 30px;
+  margin-top: 15px;
+  border: 2px solid white;
+  cursor: pointer;
+  padding: 2px;
+  box-sizing: border-box;
+}
+
+#skip-button-progress {
+  width: 100%;
+  height: 100%;
+  background-color: #00ff00;
+  transition: width 0.1s linear, background-color 0.5s linear;
+}
+
+#skip-button-text {
+  position: absolute;
+  bottom: 28px; /* Aligns with the container */
+  right: 20px;
+  width: 80px;
+  color: white;
+  font-size: 12px;
+  pointer-events: none; /* Text doesn't block clicks */
+}
+
+#gem-counters {
+  position: absolute;
+  top: 90px; /* Below level */
+  left: 20px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px 15px;
+  font-family: "Press Start 2P", cursive;
+  font-size: 14px;
+  color: white;
+}
+.gem-counter {
+  text-shadow: 0 0 5px black, 0 0 8px black;
+}
+
+#debug-info {
+  position: absolute;
+  top: 150px;
+  left: 20px;
+  color: white;
+  font-family: monospace;
+  background: rgba(0,0,0,0.5);
+  padding: 5px;
+  display: none; /* Set to 'block' to enable */
+}
+@keyframes sparkle {
+  0%, 100% { text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 15px #00bfff; }
+  50% { text-shadow: 0 0 10px #fff, 0 0 20px #00bfff, 0 0 30px #00bfff; }
+}
+.gem-sparkle {
+  animation: sparkle 1s ease-in-out;
+  /* Make sure the color is not overridden */
+  color: white !important; 
+}
