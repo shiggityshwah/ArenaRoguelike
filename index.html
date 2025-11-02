@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>3D Scene</title>
-    <link rel="stylesheet" href="css/style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arena Roguelike</title>
+    <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <div id="score">0</div>
@@ -96,25 +98,6 @@
       >
       </div>
     </div>
-    <button
-      id="reset-button"
-      style="
-        position: absolute;
-        top: 60%;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 15px 30px;
-        font-size: 24px;
-        font-family: 'Press Start 2P', cursive;
-        background-color: #00bfff;
-        color: white;
-        border: none;
-        cursor: pointer;
-        display: none;
-      "
-    >
-      Reset Game
-    </button>
 
     <div id="level-up-overlay">
       <div id="level-up-popup">
@@ -137,7 +120,7 @@
         width: 100%;
         height: 100%;
         background: rgba(0, 0, 0, 0.5);
-        display: none; /* Hidden by default */
+        display: none;
         justify-content: center;
         align-items: center;
         z-index: 200;
@@ -150,14 +133,51 @@
       PAUSED
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="js/vendor/TrailRenderer.js"></script>
-    <script src="js/game/utils.js"></script>
-    <script src="js/game/player.js"></script>
-    <script src="js/game/enemies.js"></script>
-    <script src="js/game/projectiles.js"></script>
-    <script src="js/game/relics.js"></script>
-    <script src="js/game/ui.js"></script>
-    <script src="js/game/main.js"></script>
+    <div id="game-over-screen" style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.8);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 300;
+        color: white;
+        font-family: 'Press Start 2P', cursive;
+        flex-direction: column;
+      "
+    >
+      <div style="text-align: center;">
+        <h1 style="font-size: 80px; color: #ff0000; text-shadow: 0 0 20px #ff0000; margin: 20px 0;">GAME OVER</h1>
+        <p style="font-size: 30px; margin: 20px 0;">Final Score: <span id="final-score">0</span></p>
+        <p style="font-size: 30px; margin: 20px 0;">Final Level: <span id="final-level">1</span></p>
+        <button
+          id="reset-button"
+          style="
+            padding: 15px 30px;
+            font-size: 24px;
+            font-family: 'Press Start 2P', cursive;
+            background-color: #00bfff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin-top: 20px;
+          "
+        >
+          Reset Game
+        </button>
+      </div>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js"
+        }
+      }
+    </script>
+    <script type="module" src="src/main.js"></script>
   </body>
 </html>
