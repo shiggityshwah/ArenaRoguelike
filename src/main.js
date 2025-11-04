@@ -182,6 +182,11 @@ const relicSpawnQueue = [];
 const acidGrenades = [];
 const acidPools = [];
 const lightningStrikes = [];
+const spiritWolves = [];
+const playerShield = { active: false, mesh: null, hp: 0 };
+const meteorStrikes = [];
+const voidRifts = [];
+const timeWarps = [];
 
 // Enemy tracking
 const enemyCounts = {
@@ -381,7 +386,7 @@ const playerAbilitySystem = createPlayerAbilitySystem({
 
 // ===== Dev Mode Hotkeys =====
 if (DEV_MODE) {
-    console.log('DEV MODE ENABLED: Use keys 1-4 to toggle abilities');
+    console.log('DEV MODE ENABLED: Use keys 1-0 to toggle abilities');
     window.addEventListener('keydown', (e) => {
         if (e.code === 'Digit1') {
             if (playerAbilitySystem.isUnlocked('frostNova')) {
@@ -410,6 +415,48 @@ if (DEV_MODE) {
             } else {
                 playerAbilitySystem.unlockAbility('lightningStrike');
                 console.log('DEV: Unlocked Lightning Strike');
+            }
+        } else if (e.code === 'Digit5') {
+            if (playerAbilitySystem.isUnlocked('chainLightning')) {
+                console.log('Chain Lightning already unlocked');
+            } else {
+                playerAbilitySystem.unlockAbility('chainLightning');
+                console.log('DEV: Unlocked Chain Lightning');
+            }
+        } else if (e.code === 'Digit6') {
+            if (playerAbilitySystem.isUnlocked('timeWarp')) {
+                console.log('Time Warp already unlocked');
+            } else {
+                playerAbilitySystem.unlockAbility('timeWarp');
+                console.log('DEV: Unlocked Time Warp');
+            }
+        } else if (e.code === 'Digit7') {
+            if (playerAbilitySystem.isUnlocked('meteorStrike')) {
+                console.log('Meteor Strike already unlocked');
+            } else {
+                playerAbilitySystem.unlockAbility('meteorStrike');
+                console.log('DEV: Unlocked Meteor Strike');
+            }
+        } else if (e.code === 'Digit8') {
+            if (playerAbilitySystem.isUnlocked('spiritWolves')) {
+                console.log('Spirit Wolves already unlocked');
+            } else {
+                playerAbilitySystem.unlockAbility('spiritWolves');
+                console.log('DEV: Unlocked Spirit Wolves');
+            }
+        } else if (e.code === 'Digit9') {
+            if (playerAbilitySystem.isUnlocked('shieldBurst')) {
+                console.log('Shield Burst already unlocked');
+            } else {
+                playerAbilitySystem.unlockAbility('shieldBurst');
+                console.log('DEV: Unlocked Shield Burst');
+            }
+        } else if (e.code === 'Digit0') {
+            if (playerAbilitySystem.isUnlocked('voidRift')) {
+                console.log('Void Rift already unlocked');
+            } else {
+                playerAbilitySystem.unlockAbility('voidRift');
+                console.log('DEV: Unlocked Void Rift');
             }
         }
     });
@@ -1219,6 +1266,11 @@ function animate() {
             acidGrenades,
             acidPools,
             lightningStrikes,
+            spiritWolves,
+            playerShield,
+            meteorStrikes,
+            voidRifts,
+            timeWarps,
             temporaryEffects,
             scene,
             DamageNumberManager: damageNumberManager,
@@ -1230,6 +1282,11 @@ function animate() {
         playerAbilitySystem.updateAcidGrenades(abilityState, delta);
         playerAbilitySystem.updateAcidPools(abilityState, delta);
         playerAbilitySystem.updateLightningStrikes(abilityState);
+        playerAbilitySystem.updateSpiritWolves(abilityState, delta);
+        playerAbilitySystem.updateShieldBurst(abilityState, delta);
+        playerAbilitySystem.updateMeteorStrikes(abilityState);
+        playerAbilitySystem.updateVoidRifts(abilityState, delta);
+        playerAbilitySystem.updateTimeWarps(abilityState, delta);
 
         // Update enemy projectiles
         const projectileState = {
@@ -1242,7 +1299,8 @@ function animate() {
             healthBarElement,
             playerHealth,
             isPlayerHit,
-            hitAnimationTime
+            hitAnimationTime,
+            playerShield
         };
         combatSystem.updateEnemyProjectiles(projectileState);
         // Read back updated values
@@ -1260,7 +1318,8 @@ function animate() {
             playerHealth,
             isPlayerHit,
             hitAnimationTime,
-            healthBarShakeUntil
+            healthBarShakeUntil,
+            playerShield
         };
         combatSystem.updatePlayerCollision(collisionState);
         // Read back updated values
@@ -1485,6 +1544,67 @@ function resetGame() {
     acidPools.length = 0;
 
     lightningStrikes.length = 0;
+
+    // Clear spirit wolves
+    for (const wolf of spiritWolves) {
+        scene.remove(wolf.mesh);
+        wolf.mesh.geometry.dispose();
+        wolf.mesh.material.dispose();
+    }
+    spiritWolves.length = 0;
+
+    // Clear player shield
+    if (playerShield.active && playerShield.mesh) {
+        scene.remove(playerShield.mesh);
+        playerShield.mesh.geometry.dispose();
+        playerShield.mesh.material.dispose();
+    }
+    playerShield.active = false;
+    playerShield.mesh = null;
+    playerShield.hp = 0;
+
+    // Clear meteor strikes
+    for (const meteor of meteorStrikes) {
+        if (meteor.mesh) {
+            scene.remove(meteor.mesh);
+            meteor.mesh.geometry.dispose();
+            meteor.mesh.material.dispose();
+            // Dispose trail too
+            if (meteor.mesh.children.length > 0) {
+                meteor.mesh.children.forEach(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                });
+            }
+        }
+    }
+    meteorStrikes.length = 0;
+
+    // Clear void rifts
+    for (const rift of voidRifts) {
+        scene.remove(rift.mesh);
+        rift.mesh.geometry.dispose();
+        rift.mesh.material.dispose();
+    }
+    voidRifts.length = 0;
+
+    // Clear time warps
+    for (const warp of timeWarps) {
+        // Restore enemy speeds
+        if (warp.affectedEnemies) {
+            warp.affectedEnemies.forEach(enemy => {
+                if (enemy && enemy.originalSpeed !== undefined) {
+                    enemy.speed = enemy.originalSpeed;
+                    delete enemy.originalSpeed;
+                    delete enemy.inTimeWarp;
+                }
+            });
+        }
+        scene.remove(warp.mesh);
+        warp.mesh.geometry.dispose();
+        warp.mesh.material.dispose();
+    }
+    timeWarps.length = 0;
 
     // Reset abilities (optional - comment out to keep abilities between games)
     // playerAbilitySystem.devClearAbilities();

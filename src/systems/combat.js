@@ -245,12 +245,23 @@ export function createCombatSystem({
                 } else {
                     let damageTaken = 5 * (50 / (50 + playerStats.armor));
                     if (playerIsBoosted) damageTaken *= relicInfo.speed.damageTakenMultiplier;
-                    playerHealth -= damageTaken;
-                    healthBarElement.style.width = (playerHealth / playerStats.maxHealth) * 100 + '%';
-                    damageNumberManager.create(playerCone, damageTaken, {});
-                    isPlayerHit = true;
-                    hitAnimationTime = 0;
-                    AudioManager.play('hit', 0.8);
+
+                    // Check for active shield
+                    const playerShield = gameState.playerShield;
+                    if (playerShield && playerShield.active && playerShield.hp > 0) {
+                        // Shield absorbs damage
+                        playerShield.hp -= damageTaken;
+                        damageNumberManager.create(playerCone, damageTaken, { isShieldBlock: true });
+                        AudioManager.play('hit', 0.4);
+                    } else {
+                        // No shield or shield broken - damage player
+                        playerHealth -= damageTaken;
+                        healthBarElement.style.width = (playerHealth / playerStats.maxHealth) * 100 + '%';
+                        damageNumberManager.create(playerCone, damageTaken, {});
+                        isPlayerHit = true;
+                        hitAnimationTime = 0;
+                        AudioManager.play('hit', 0.8);
+                    }
                 }
 
                 // Update game state
@@ -323,14 +334,25 @@ export function createCombatSystem({
 
                 let damageTaken = enemy.contactDamage * (50 / (50 + playerStats.armor));
                 if (playerIsBoosted) damageTaken *= relicInfo.speed.damageTakenMultiplier;
-                playerHealth -= damageTaken;
-                healthBarElement.style.width = (playerHealth / playerStats.maxHealth) * 100 + '%';
-                damageNumberManager.create(playerCone, damageTaken, {});
-                isPlayerHit = true;
-                hitAnimationTime = 0;
-                AudioManager.play('hit', 0.8);
-                healthBarElement.parentElement.classList.add('health-bar-shaking');
-                healthBarShakeUntil = clock.getElapsedTime() + 0.3;
+
+                // Check for active shield
+                const playerShield = gameState.playerShield;
+                if (playerShield && playerShield.active && playerShield.hp > 0) {
+                    // Shield absorbs damage
+                    playerShield.hp -= damageTaken;
+                    damageNumberManager.create(playerCone, damageTaken, { isShieldBlock: true });
+                    AudioManager.play('hit', 0.4);
+                } else {
+                    // No shield or shield broken - damage player
+                    playerHealth -= damageTaken;
+                    healthBarElement.style.width = (playerHealth / playerStats.maxHealth) * 100 + '%';
+                    damageNumberManager.create(playerCone, damageTaken, {});
+                    isPlayerHit = true;
+                    hitAnimationTime = 0;
+                    AudioManager.play('hit', 0.8);
+                    healthBarElement.parentElement.classList.add('health-bar-shaking');
+                    healthBarShakeUntil = clock.getElapsedTime() + 0.3;
+                }
                 enemy.health = 0; // Mark for death
             }
         }
