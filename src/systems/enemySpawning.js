@@ -18,6 +18,9 @@
  */
 
 import * as THREE from 'three';
+import { createBoss } from './bossSystem.js';
+import { getRandomBossType } from '../config/bossTypes.js';
+import { BOSS_WAVE_INTERVAL, MAX_ACTIVE_BOSSES } from '../config/constants.js';
 
 // Enemy unlock levels
 const enemyUnlockLevels = {
@@ -234,4 +237,93 @@ export function spawnEnemy(dependencies) {
     } else {
         spawnSpecificEnemy(typeToSpawn, false, dependencies);
     }
+}
+
+/**
+ * Check if current wave should spawn a boss
+ * @param {number} waveNumber - Current wave number
+ * @returns {boolean} True if this is a boss wave
+ */
+export function isBossWave(waveNumber) {
+    return waveNumber > 0 && waveNumber % BOSS_WAVE_INTERVAL === 0;
+}
+
+/**
+ * Spawn a new-style boss (using boss system)
+ * @param {Object} dependencies - Dependencies for boss spawning
+ * @returns {Object|null} Created boss entity or null if failed
+ *
+ * Dependencies:
+ * - scene: THREE.Scene
+ * - level: Current player level
+ * - waveNumber: Current wave number
+ * - bosses: Array of active bosses
+ * - bossUIManager: Boss UI manager instance
+ * - bossType: (Optional) Specific boss type to spawn. If not provided, random based on level.
+ */
+export function spawnNewBoss(dependencies) {
+    const {
+        scene,
+        level,
+        waveNumber,
+        bosses,
+        bossUIManager,
+        playerCone,
+        bossType: specifiedBossType
+    } = dependencies;
+
+    // Check if we can spawn more bosses
+    if (bosses.length >= MAX_ACTIVE_BOSSES) {
+        console.log('Max bosses reached, cannot spawn more');
+        return null;
+    }
+
+    // Get boss type - use specified type or get random based on player level
+    const bossType = specifiedBossType || getRandomBossType(level);
+
+    // Determine spawn position (far from player)
+    let spawnPosition;
+    let attempts = 0;
+
+    do {
+        const x = (Math.random() - 0.5) * 900;
+        const z = (Math.random() - 0.5) * 900;
+        spawnPosition = new THREE.Vector3(x, 100, z); // Spawns high in sky
+
+        attempts++;
+        if (attempts > 100) {
+            console.warn('Could not find spawn position far from player');
+            spawnPosition = new THREE.Vector3(0, 100, 300);
+            break;
+        }
+    } while (
+        playerCone &&
+        spawnPosition.distanceTo(playerCone.position) < 200
+    );
+
+    // Create boss using new boss system
+    const boss = createBoss({
+        scene,
+        bossType,
+        waveNumber,
+        level,
+        spawnPosition,
+    });
+
+    if (!boss) {
+        console.error('Failed to create boss');
+        return null;
+    }
+
+    // Add to bosses array
+    bosses.push(boss);
+
+    // Create health bar UI
+    if (bossUIManager) {
+        bossUIManager.createHealthBar(boss);
+    }
+
+    console.log(`Spawned boss: ${boss.bossType} (Wave ${waveNumber})`);
+
+    return boss;
 }

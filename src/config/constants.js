@@ -18,3 +18,11 @@ export const MAX_RELICS = 20;
 
 // Relic spawn priority: White > Yellow > Blue > Green > Red > Purple
 export const relicPriority = ['luck', 'crit', 'vacuum', 'speed', 'damage', 'attackSpeed'];
+
+// Boss System Constants
+export const BOSS_WAVE_INTERVAL = 5; // Boss spawns every N waves (waves 5, 10, 15, etc.)
+export const BOSS_XP_REWARD = 50; // XP gained from defeating a boss
+export const BOSS_UPGRADE_MIN_QUALITY = 'rare'; // Minimum upgrade quality from boss kills
+export const MAX_ACTIVE_BOSSES = 1; // Only 1 boss active at a time
+export const BOSS_DESPAWN_TIME = 120; // Seconds before boss despawns if not defeated (0 = never)
+export const BOSS_MINION_LIMIT = 10; // Max minions a boss can have spawned at once

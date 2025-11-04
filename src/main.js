@@ -23,7 +23,10 @@ import {
     RELIC_SPAWN_Y,
     MAX_RELICS,
     relicPriority,
-    DEV_MODE
+    DEV_MODE,
+    BOSS_WAVE_INTERVAL,
+    BOSS_XP_REWARD,
+    MAX_ACTIVE_BOSSES
 } from './config/constants.js';
 import enemyPrototypes from './config/enemyTypes.js';
 import gemTypes from './config/gemTypes.js';
@@ -35,6 +38,7 @@ import SpatialGrid from './managers/SpatialGrid.js';
 import DamageNumberManager from './managers/DamageNumberManager.js';
 import AreaWarningManager from './managers/AreaWarningManager.js';
 import AudioManager from './managers/AudioManager.js';
+import BossUIManager from './systems/bossUI.js';
 
 // ===== System Imports =====
 import { createPlayerStats, resetPlayerStats } from './systems/playerStats.js';
@@ -50,8 +54,11 @@ import {
 import {
     spawnEnemy,
     spawnBoss,
-    spawnSpecificEnemy
+    spawnSpecificEnemy,
+    isBossWave,
+    spawnNewBoss
 } from './systems/enemySpawning.js';
+import { updateBoss, bossTakeDamage, destroyBoss } from './systems/bossSystem.js';
 import { createGem, handleEnemyDeath } from './systems/gems.js';
 import createRelicCombatStrategies from './systems/relicCombat.js';
 import { spawnRelic, spawnInitialRelics, scheduleRelicSpawn, destroyRelic } from './systems/relicSpawning.js';
@@ -66,6 +73,7 @@ import { createPlayerAbilitySystem, ABILITY_DEFINITIONS } from './systems/player
 
 // ===== Utility Imports =====
 import { TrailRenderer } from './utils/TrailRenderer.js';
+import DebugPanel from './utils/DebugPanel.js';
 
 // ===== THREE.js Scene Setup (lines ~1122-1135) =====
 const scene = new THREE.Scene();
@@ -154,6 +162,7 @@ let maxEnemies = INITIAL_ENEMY_COUNT;
 let gameSpeedMultiplier = 1.0;
 let playerScaleMultiplier = 1.0;
 let bossCount = 0;
+let waveNumber = 0; // Track current wave for boss spawning
 let isGameOver = false;
 let isGamePaused = false;
 let isPlayerHit = false;
@@ -165,6 +174,7 @@ let lastRegenNumberTime = 0;
 
 // ===== Entity Arrays =====
 const enemies = [];
+const bosses = []; // New boss system
 const blasterShots = [];
 const enemyProjectiles = [];
 const beams = [];
@@ -230,6 +240,7 @@ const playerBuffs = {
 const spatialGrid = new SpatialGrid(2000, 2000, 100);
 const damageNumberManager = new DamageNumberManager(scene, clock);
 const trailRenderer = new TrailRenderer(scene, camera);
+const bossUIManager = new BossUIManager(scene);
 
 // Trail material for blaster shots
 const trailMaterial = trailRenderer.createMaterial();
@@ -504,8 +515,27 @@ function updatePlayerMovement(delta) {
  * Updates enemy AI and movement
  */
 function updateEnemies(delta) {
-    // Check if we need to spawn more enemies
-    if (enemies.length < maxEnemies) {
+    // Check for wave completion and boss spawning
+    if (enemies.length === 0 && bosses.length === 0) {
+        waveNumber++;
+        console.log(`Wave ${waveNumber} starting`);
+
+        // Check if this is a boss wave
+        if (isBossWave(waveNumber)) {
+            console.log(`Boss wave! Spawning boss...`);
+            spawnNewBoss({
+                scene,
+                level,
+                waveNumber,
+                bosses,
+                bossUIManager,
+                playerCone
+            });
+        }
+    }
+
+    // Check if we need to spawn more enemies (only if no boss active)
+    if (enemies.length < maxEnemies && bosses.length === 0) {
         const enemyDependencies = {
             scene,
             enemies,
@@ -1220,6 +1250,153 @@ function checkGameOver() {
     }
 }
 
+/**
+ * Updates all active bosses
+ */
+function updateBosses(delta) {
+    // Create game state for boss system
+    const gameState = {
+        scene,
+        playerCone,
+        enemies,
+        bosses,
+        spatialGrid,
+        AudioManager,
+        damageNumberManager,
+        bossUIManager,
+        clock,
+        enemyProjectiles,
+        objectPools,
+        playerStats,
+        level,
+        waveNumber
+    };
+
+    // Update each boss
+    for (let i = bosses.length - 1; i >= 0; i--) {
+        const boss = bosses[i];
+
+        // Check if boss is dead
+        if (boss.health <= 0) {
+            console.log(`Boss ${boss.bossType} defeated!`);
+
+            // Award XP
+            experience += BOSS_XP_REWARD;
+            updateExperienceBar(experience, experienceToNextLevel);
+
+            // Create death explosion
+            createExplosion(boss.mesh.position, 80, scene, temporaryEffects, clock);
+
+            // Drop gems/coins
+            const deathDependencies = {
+                scene,
+                skeletons,
+                coins,
+                gems,
+                gemTypes,
+                enemyCounts,
+                getBossCount: () => bossCount,
+                setBossCount: (val) => { bossCount = val; },
+                gravityWellEffects,
+                coinSpriteMaterial,
+                playerStats,
+                getScore: () => score,
+                setScore: (val) => { score = val; updateScoreUI(score); },
+                scoreElement
+            };
+
+            // Create fake enemy object for handleEnemyDeath
+            const fakeBossEnemy = {
+                mesh: boss.mesh,
+                type: boss.bossType,
+                isBoss: true,
+                health: 0
+            };
+            handleEnemyDeath(fakeBossEnemy, deathDependencies);
+
+            // Show ability selection popup
+            showAbilitySelectionPopup();
+
+            // Clean up boss
+            destroyBoss(boss, scene);
+            bossUIManager.removeHealthBar(boss.id);
+            bosses.splice(i, 1);
+
+            // Check for level up
+            if (experience >= experienceToNextLevel) {
+                const progressionState = {
+                    level,
+                    experience,
+                    experienceToNextLevel,
+                    gameSpeedMultiplier,
+                    playerScaleMultiplier,
+                    maxEnemies,
+                    playerStats,
+                    playerCone,
+                    enemies,
+                    playerHealth,
+                    damageNumberManager,
+                    updateStatsUI,
+                    setGamePaused: (paused) => { isGamePaused = paused; }
+                };
+                const updates = levelUp(progressionState);
+                level = updates.level;
+                experience = updates.experience;
+                experienceToNextLevel = updates.experienceToNextLevel;
+                gameSpeedMultiplier = updates.gameSpeedMultiplier;
+                playerScaleMultiplier = updates.playerScaleMultiplier;
+                maxEnemies = updates.maxEnemies;
+                isGamePaused = true;
+            }
+
+            continue;
+        }
+
+        // Update boss
+        updateBoss(boss, gameState, delta);
+
+        // Apply gravity pull from boss to player
+        if (boss.phaseData.behaviors.gravityPull) {
+            const pullForce = playerCone.userData.gravityPull;
+            if (pullForce) {
+                playerCone.position.add(pullForce);
+                delete playerCone.userData.gravityPull;
+            }
+        }
+
+        // Check contact damage with player
+        const distanceToBoss = boss.mesh.position.distanceTo(playerCone.position);
+        const collisionDistance = boss.mesh.geometry.parameters?.radius * boss.mesh.scale.x || 30;
+
+        if (distanceToBoss < collisionDistance + 10) {
+            // Apply contact damage with cooldown (1 second between hits)
+            const now = Date.now();
+            if (!boss.lastContactDamageTime || now - boss.lastContactDamageTime > 1000) {
+                boss.lastContactDamageTime = now;
+
+                // Player hit by boss contact damage
+                const damage = boss.contactDamage * (50 / (50 + playerStats.armor));
+
+                playerHealth -= damage;
+                damageNumberManager.create(playerCone, damage, { isCritical: false });
+
+                if (playerHealth <= 0) {
+                    playerHealth = 0;
+                    // Game over will be handled by checkGameOver() in the main loop
+                }
+
+                // Visual feedback
+                isPlayerHit = true;
+                hitAnimationTime = 0;
+                healthBarShakeUntil = Date.now() + 200;
+            }
+        }
+    }
+
+    // Update boss UI
+    bossUIManager.update(camera, delta);
+}
+
 // ===== Main Animation Loop (lines ~2405-3395) =====
 function animate() {
     requestAnimationFrame(animate);
@@ -1238,6 +1415,9 @@ function animate() {
         // Update enemies first (they populate the spatial grid)
         updateEnemies(delta);
 
+        // Update bosses
+        updateBosses(delta);
+
         // Update player
         updatePlayerMovement(delta);
 
@@ -1246,7 +1426,8 @@ function animate() {
             playerCone,
             playerStats,
             blasterShots,
-            playerBuffs
+            playerBuffs,
+            bosses
         };
         combatSystem.updatePlayerShooting(shootingState);
 
@@ -1254,7 +1435,9 @@ function animate() {
         combatSystem.updateBlasterShots({
             blasterShots,
             playerStats,
-            playerBuffs
+            playerBuffs,
+            bosses,
+            bossTakeDamage
         });
 
         // Update player abilities
@@ -1392,6 +1575,11 @@ function animate() {
         checkGameOver();
     }
 
+    // Update boss tester (if in dev mode)
+    if (debugPanel) {
+        debugPanel.update();
+    }
+
     // Render scene
     renderer.render(scene, camera);
 }
@@ -1405,6 +1593,7 @@ function resetGame() {
     experienceToNextLevel = 20;
     playerHealth = 100;
     maxEnemies = INITIAL_ENEMY_COUNT;
+    waveNumber = 0;
     gameSpeedMultiplier = 1.0;
     playerScaleMultiplier = 1.0;
     bossCount = 0;
@@ -1456,6 +1645,21 @@ function resetGame() {
         }
     }
     enemies.length = 0;
+
+    // Clear all bosses
+    for (const boss of bosses) {
+        destroyBoss(boss, scene);
+        if (bossUIManager) {
+            bossUIManager.removeHealthBar(boss.id);
+        }
+    }
+    bosses.length = 0;
+
+    // Clear boss warning overlay if present
+    const bossWarning = document.getElementById('boss-warning-overlay');
+    if (bossWarning && bossWarning.parentNode) {
+        bossWarning.parentNode.removeChild(bossWarning);
+    }
 
     for (const shot of blasterShots) {
         shot.trail.deactivate();
@@ -1626,7 +1830,13 @@ function resetGame() {
 
     // Reset managers
     spatialGrid.clear();
-    damageNumberManager.clear();
+    // Clear damage numbers manually
+    if (damageNumberManager.activeNumbers) {
+        damageNumberManager.activeNumbers.forEach(num => {
+            if (num.sprite) scene.remove(num.sprite);
+        });
+        damageNumberManager.activeNumbers.length = 0;
+    }
     AreaWarningManager.warnings.length = 0;
 
     // Reset combat system
@@ -1709,6 +1919,97 @@ updateExperienceBar(experience, experienceToNextLevel);
 
 // Initialize AudioManager
 AudioManager.init();
+
+// Initialize Debug Panel System (DEV_MODE only)
+let debugPanel = null;
+if (DEV_MODE) {
+    // Create a comprehensive game state object for debug panel
+    const debugGameState = {
+        // Three.js
+        scene,
+        camera,
+        renderer,
+        clock,
+
+        // Player
+        playerCone,
+        playerStats,
+        playerBuffs,
+        get playerHealth() { return playerHealth; },
+        set playerHealth(val) { playerHealth = val; },
+
+        // Game state
+        get level() { return level; },
+        set level(val) { level = val; },
+        get experience() { return experience; },
+        set experience(val) { experience = val; },
+        get experienceToNextLevel() { return experienceToNextLevel; },
+        set experienceToNextLevel(val) { experienceToNextLevel = val; },
+        get score() { return score; },
+        set score(val) { score = val; },
+        get waveNumber() { return waveNumber; },
+        set waveNumber(val) { waveNumber = val; },
+        get maxEnemies() { return maxEnemies; },
+        set maxEnemies(val) { maxEnemies = val; },
+        get gameSpeedMultiplier() { return gameSpeedMultiplier; },
+        set gameSpeedMultiplier(val) { gameSpeedMultiplier = val; },
+        get bossCount() { return bossCount; },
+        set bossCount(val) { bossCount = val; },
+        autoSpawnEnabled: true, // Track auto-spawn state
+        maxRelics: MAX_RELICS,
+
+        // Entity arrays
+        enemies,
+        bosses,
+        relics,
+        gems,
+        coins,
+        blasterShots,
+        enemyProjectiles,
+        relicProjectiles,
+        temporaryEffects,
+        gravityWellEffects,
+        beams,
+
+        // Entity tracking
+        enemyCounts,
+        gemCounts,
+
+        // Managers
+        spatialGrid,
+        damageNumberManager,
+        bossUIManager,
+
+        // Systems
+        abilitySystem: playerAbilitySystem,
+
+        // Config
+        enemyPrototypes,
+        gemTypes,
+        relicInfo,
+
+        // Functions
+        createGravityVortex: (parent, count, radius, color, isRotated) =>
+            createGravityVortex(parent, count, radius, color, isRotated, gravityWellEffects),
+        destroyBoss: destroyBoss,
+        levelUp: () => levelUp({
+            level,
+            experience,
+            experienceToNextLevel,
+            playerStats,
+            showLevelUpPopup: () => showLevelUpPopup({ playerStats })
+        }),
+        updateStatsUI: () => updateStatsUI({ playerStats }),
+        updateScoreUI: () => updateScoreUI({ score }),
+        updateLevelUI: () => updateLevelUI({ level }),
+        updateExperienceBar: () => updateExperienceBar({ experience, experienceToNextLevel })
+    };
+
+    debugPanel = new DebugPanel(debugGameState);
+    debugPanel.init();
+    console.log('%c🔧 DEBUG PANEL SYSTEM ENABLED', 'color: #00ff00; font-size: 14px; font-weight: bold;');
+    console.log('%cPress T to open the debug panel', 'color: #ffff00;');
+}
 
 // Initialize gem counter UI
 for (const type in gemCounts) {

@@ -71,6 +71,18 @@ export function createCombatSystem({
                 }
             }
 
+            // Also check bosses (they're in a separate array)
+            if (gameState.bosses) {
+                for (const boss of gameState.bosses) {
+                    if (!boss || !boss.isActive || boss.health <= 0) continue;
+                    const distance = playerCone.position.distanceTo(boss.mesh.position);
+                    if (distance < playerStats.attackDistance && distance < bestDistance) {
+                        bestDistance = distance;
+                        nearest = boss;
+                    }
+                }
+            }
+
             // If we found a valid target within range
             if (nearest) {
                 lastShotTime = now;
@@ -190,6 +202,53 @@ export function createCombatSystem({
                         blasterShots.splice(i, 1);
                         shotConsumed = true;
                         break;
+                    }
+                }
+            }
+
+            if (shotConsumed) continue;
+
+            // Collision detection with bosses
+            if (gameState.bosses) {
+                for (const boss of gameState.bosses) {
+                    if (!boss || !boss.isActive || boss.health <= 0) continue;
+                    if (shot.hitEnemies.includes(boss)) continue; // Already hit by this shot
+
+                    const bossRadius = (boss.mesh.geometry.parameters?.radius ||
+                                       boss.mesh.geometry.parameters?.width ||
+                                       20) * boss.mesh.scale.x;
+
+                    if (shot.mesh.position.distanceTo(boss.mesh.position) < (shot.mesh.geometry.parameters.radius + bossRadius)) {
+                        // Import boss damage handler
+                        if (gameState.bossTakeDamage) {
+                            shot.pierceLeft--;
+                            shot.hitEnemies.push(boss);
+
+                            let currentDamage = playerStats.damage * playerBuffs.damageMult;
+                            let isCritical = false;
+                            if (Math.random() < playerStats.critChance) {
+                                currentDamage *= playerStats.critMultiplier;
+                                isCritical = true;
+                            }
+
+                            const damageApplied = gameState.bossTakeDamage(boss, currentDamage, gameState);
+
+                            if (damageApplied) {
+                                damageNumberManager.create(boss.mesh, currentDamage, { isCritical });
+                                AudioManager.play('hit', 0.4);
+                            } else {
+                                // Hit invulnerable boss
+                                AudioManager.play('windChime', 0.6);
+                            }
+                        }
+
+                        if (shot.pierceLeft <= 0) {
+                            shot.trail.deactivate();
+                            objectPools.blasterShots.release(shot);
+                            blasterShots.splice(i, 1);
+                            shotConsumed = true;
+                            break;
+                        }
                     }
                 }
             }
