@@ -136,8 +136,128 @@ canvas {
   transform: scale(1);
 }
 
+/* Game Over Screen */
+#game-over-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 300;
+  color: white;
+  font-family: 'Press Start 2P', cursive;
+  flex-direction: column;
+}
+
 #game-over-screen.visible {
   display: flex;
+}
+
+/* Ability Selection Overlay (Boss Kill Rewards) */
+#ability-selection-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(20, 0, 40, 0.9);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 150;
+  font-family: "Press Start 2P", cursive;
+}
+
+#ability-selection-popup {
+  background: linear-gradient(135deg, rgba(60, 20, 80, 0.95), rgba(40, 10, 60, 0.95));
+  border: 4px solid #ff00ff;
+  box-shadow: 0 0 30px #ff00ff, inset 0 0 20px rgba(255, 0, 255, 0.2);
+  padding: 40px;
+  text-align: center;
+  color: white;
+  transform: scale(0);
+  transition: transform 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+  max-width: 800px;
+  width: 90%;
+}
+
+#ability-selection-overlay.visible {
+  display: flex;
+}
+
+#ability-selection-overlay.visible #ability-selection-popup {
+  transform: scale(1);
+}
+
+#ability-selection-popup h2 {
+  color: #ff00ff;
+  text-shadow: 0 0 15px #ff00ff, 0 0 30px #ff00ff;
+  margin-top: 0;
+  font-size: 36px;
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { text-shadow: 0 0 15px #ff00ff, 0 0 30px #ff00ff; }
+  50% { text-shadow: 0 0 25px #ff00ff, 0 0 50px #ff00ff; }
+}
+
+#ability-selection-popup p {
+  font-size: 18px;
+  margin-bottom: 30px;
+}
+
+#ability-options {
+  display: flex;
+  justify-content: center;
+  gap: 30px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+
+.ability-card {
+  background: rgba(20, 20, 40, 0.8);
+  border: 3px solid #ffffff;
+  border-radius: 15px;
+  padding: 20px;
+  width: 200px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.ability-card:hover {
+  transform: translateY(-10px) scale(1.05);
+  box-shadow: 0 10px 30px rgba(255, 255, 255, 0.4);
+  border-color: #ffff00;
+}
+
+.ability-card .ability-icon {
+  font-size: 48px;
+  margin-bottom: 15px;
+}
+
+.ability-card .ability-name {
+  font-size: 16px;
+  font-weight: bold;
+  margin-bottom: 10px;
+  color: #ffff00;
+}
+
+.ability-card .ability-description {
+  font-size: 10px;
+  line-height: 1.4;
+  color: #cccccc;
+}
+
+.ability-card .ability-cooldown {
+  font-size: 12px;
+  color: #00ffff;
+  margin-top: 10px;
 }
 
 #level-up-popup h2 {

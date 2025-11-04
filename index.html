@@ -133,22 +133,7 @@
       PAUSED
     </div>
 
-    <div id="game-over-screen" style="
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.8);
-        display: none;
-        justify-content: center;
-        align-items: center;
-        z-index: 300;
-        color: white;
-        font-family: 'Press Start 2P', cursive;
-        flex-direction: column;
-      "
-    >
+    <div id="game-over-screen">
       <div style="text-align: center;">
         <h1 style="font-size: 80px; color: #ff0000; text-shadow: 0 0 20px #ff0000; margin: 20px 0;">GAME OVER</h1>
         <p style="font-size: 30px; margin: 20px 0;">Final Score: <span id="final-score">0</span></p>
@@ -168,6 +153,16 @@
         >
           Reset Game
         </button>
+      </div>
+    </div>
+
+    <div id="ability-selection-overlay">
+      <div id="ability-selection-popup">
+        <h2>BOSS DEFEATED!</h2>
+        <p>Choose a new ability</p>
+        <div id="ability-options">
+          <!-- Ability cards will be generated here -->
+        </div>
       </div>
     </div>
 

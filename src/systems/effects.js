@@ -243,8 +243,11 @@ export function updateTemporaryEffects(temporaryEffects, clock, scene, delta) {
             continue;
         }
 
-        // Update effect based on type
-        if (effect.type === 'explosion') {
+        // Update effect based on type or custom callback
+        if (effect.onUpdate) {
+            // Custom update function provided
+            effect.onUpdate(effect, progress);
+        } else if (effect.type === 'explosion') {
             // Fade out and expand
             effect.mesh.material.opacity = 0.8 * (1.0 - progress);
             const scale = 1.0 + progress * 0.5;

@@ -1,6 +1,9 @@
 // Game constants - Core configuration values for gameplay mechanics
 // Extracted from index-reference.html (lines ~1599-1616)
 
+// Development mode - enables ability testing hotkeys (1-4)
+export const DEV_MODE = true;
+
 export const INITIAL_ENEMY_COUNT = 10;
 export const BASE_PLAYER_SPEED = 0.5;
 export const BASE_PLAYER_RADIUS = 1.5;

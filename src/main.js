@@ -22,7 +22,8 @@ import {
     MIN_BOX_RATIO,
     RELIC_SPAWN_Y,
     MAX_RELICS,
-    relicPriority
+    relicPriority,
+    DEV_MODE
 } from './config/constants.js';
 import enemyPrototypes from './config/enemyTypes.js';
 import gemTypes from './config/gemTypes.js';
@@ -61,6 +62,7 @@ import {
     updateGravityVortexEffects,
     updateTemporaryEffects
 } from './systems/effects.js';
+import { createPlayerAbilitySystem, ABILITY_DEFINITIONS } from './systems/playerAbilities.js';
 
 // ===== Utility Imports =====
 import { TrailRenderer } from './utils/TrailRenderer.js';
@@ -175,6 +177,11 @@ const gravityWellEffects = [];
 const damagingAuras = [];
 const relicProjectiles = [];
 const relicSpawnQueue = [];
+
+// Ability system entity arrays
+const acidGrenades = [];
+const acidPools = [];
+const lightningStrikes = [];
 
 // Enemy tracking
 const enemyCounts = {
@@ -362,6 +369,55 @@ const relicCombatStrategies = createRelicCombatStrategies({
     getClock: () => clock
 });
 
+// ===== Player Ability System =====
+const playerAbilitySystem = createPlayerAbilitySystem({
+    scene,
+    spatialGrid,
+    objectPools,
+    AudioManager,
+    clock,
+    AreaWarningManager
+});
+
+// ===== Dev Mode Hotkeys =====
+if (DEV_MODE) {
+    console.log('DEV MODE ENABLED: Use keys 1-4 to toggle abilities');
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Digit1') {
+            if (playerAbilitySystem.isUnlocked('frostNova')) {
+                console.log('Frost Nova already unlocked');
+            } else {
+                playerAbilitySystem.unlockAbility('frostNova');
+                console.log('DEV: Unlocked Frost Nova');
+            }
+        } else if (e.code === 'Digit2') {
+            if (playerAbilitySystem.isUnlocked('shotgunBlast')) {
+                console.log('Shotgun Blast already unlocked');
+            } else {
+                playerAbilitySystem.unlockAbility('shotgunBlast');
+                console.log('DEV: Unlocked Shotgun Blast');
+            }
+        } else if (e.code === 'Digit3') {
+            if (playerAbilitySystem.isUnlocked('acidGrenade')) {
+                console.log('Acid Grenade already unlocked');
+            } else {
+                playerAbilitySystem.unlockAbility('acidGrenade');
+                console.log('DEV: Unlocked Acid Grenade');
+            }
+        } else if (e.code === 'Digit4') {
+            if (playerAbilitySystem.isUnlocked('lightningStrike')) {
+                console.log('Lightning Strike already unlocked');
+            } else {
+                playerAbilitySystem.unlockAbility('lightningStrike');
+                console.log('DEV: Unlocked Lightning Strike');
+            }
+        }
+    });
+
+    // Make ability system available in console
+    window.devAbilitySystem = playerAbilitySystem;
+}
+
 // ===== Helper Functions =====
 
 /**
@@ -452,6 +508,11 @@ function updateEnemies(delta) {
             experience += enemy.isBoss ? 20 : 3;
             updateExperienceBar(experience, experienceToNextLevel);
 
+            // Check if boss was killed - show ability selection
+            if (enemy.isBoss) {
+                showAbilitySelectionPopup();
+            }
+
             // Check for level up
             if (experience >= experienceToNextLevel) {
                 const progressionState = {
@@ -503,8 +564,48 @@ function updateEnemies(delta) {
             enemy.mesh.material.emissiveIntensity = 0.6;
         }
 
-        // Enemy shooting logic
-        if ((enemy.type === 'shooter' || enemy.type === 'elite') && enemy.lastShotTime !== undefined) {
+        // Check if enemy is frozen
+        const now = clock.getElapsedTime();
+        const isFrozen = enemy.frozenUntil && now < enemy.frozenUntil;
+
+        if (isFrozen) {
+            // Apply frozen visual effect
+            if (!enemy.wasFrozen) {
+                enemy.wasFrozen = true;
+                // Save original colors and rotation
+                enemy.preFrozenColor = enemy.mesh.material.color.clone();
+                enemy.preFrozenEmissive = enemy.mesh.material.emissive.clone();
+                enemy.preFrozenIntensity = enemy.mesh.material.emissiveIntensity;
+                enemy.frozenRotation = enemy.mesh.rotation.clone();
+            }
+
+            // Apply frost color (cyan tint)
+            enemy.mesh.material.color.setHex(0x88FFFF);
+            enemy.mesh.material.emissive.setHex(0x00FFFF);
+
+            // Pulsing frost animation
+            const pulseSpeed = 3;
+            const pulse = Math.sin(now * pulseSpeed) * 0.5 + 0.5; // 0 to 1
+            enemy.mesh.material.emissiveIntensity = 0.5 + pulse * 0.5; // 0.5 to 1.0
+
+            // Lock rotation
+            if (enemy.frozenRotation) {
+                enemy.mesh.rotation.copy(enemy.frozenRotation);
+            }
+        } else if (enemy.wasFrozen) {
+            // Restore original appearance
+            enemy.wasFrozen = false;
+            if (enemy.preFrozenColor) {
+                enemy.mesh.material.color.copy(enemy.preFrozenColor);
+            }
+            if (enemy.preFrozenEmissive) {
+                enemy.mesh.material.emissive.copy(enemy.preFrozenEmissive);
+                enemy.mesh.material.emissiveIntensity = enemy.preFrozenIntensity;
+            }
+        }
+
+        // Enemy shooting logic (skip if frozen)
+        if (!isFrozen && (enemy.type === 'shooter' || enemy.type === 'elite') && enemy.lastShotTime !== undefined) {
             const now = clock.getElapsedTime();
             const shootCooldown = (enemy.type === 'shooter' ? 2.0 : 1.5) / gameSpeedMultiplier;
 
@@ -514,35 +615,67 @@ function updateEnemies(delta) {
 
                 if (distance < range) {
                     enemy.lastShotTime = now;
-                    const projectile = objectPools.enemyProjectiles.get();
-                    projectile.mesh.position.copy(enemy.mesh.position);
-                    projectile.direction.subVectors(playerCone.position, enemy.mesh.position).normalize();
-                    projectile.distanceTraveled = 0;
-                    enemyProjectiles.push(projectile);
+
+                    // Elite enemies shoot 3 projectiles in a spread
+                    if (enemy.type === 'elite') {
+                        const baseDirection = new THREE.Vector3()
+                            .subVectors(playerCone.position, enemy.mesh.position)
+                            .normalize();
+
+                        // Calculate spread angles: -15°, 0°, +15°
+                        const spreadAngles = [-Math.PI / 12, 0, Math.PI / 12];
+
+                        spreadAngles.forEach(angleOffset => {
+                            const projectile = objectPools.enemyProjectiles.get();
+                            projectile.mesh.position.copy(enemy.mesh.position);
+
+                            // Rotate direction by angleOffset
+                            const angle = Math.atan2(baseDirection.x, baseDirection.z) + angleOffset;
+                            projectile.direction.set(
+                                Math.sin(angle),
+                                0,
+                                Math.cos(angle)
+                            ).normalize();
+
+                            projectile.distanceTraveled = 0;
+                            enemyProjectiles.push(projectile);
+                        });
+                    } else {
+                        // Shooter enemies shoot single projectile
+                        const projectile = objectPools.enemyProjectiles.get();
+                        projectile.mesh.position.copy(enemy.mesh.position);
+                        projectile.direction.subVectors(playerCone.position, enemy.mesh.position).normalize();
+                        projectile.distanceTraveled = 0;
+                        enemyProjectiles.push(projectile);
+                    }
+
                     AudioManager.play('enemyShoot', 0.4);
                 }
             }
         }
 
         // Movement AI (horizontal only - keep Y constant to prevent sinking)
-        const directionToPlayer = new THREE.Vector3(
-            playerCone.position.x - enemy.mesh.position.x,
-            0,  // No Y movement
-            playerCone.position.z - enemy.mesh.position.z
-        ).normalize();
+        // Skip movement if frozen
+        if (!isFrozen) {
+            const directionToPlayer = new THREE.Vector3(
+                playerCone.position.x - enemy.mesh.position.x,
+                0,  // No Y movement
+                playerCone.position.z - enemy.mesh.position.z
+            ).normalize();
 
-        // Add movement with pull forces
-        const movement = directionToPlayer.clone().multiplyScalar(enemy.speed);
-        movement.add(enemy.pullForces);
+            // Add movement with pull forces
+            const movement = directionToPlayer.clone().multiplyScalar(enemy.speed);
+            movement.add(enemy.pullForces);
 
-        // Store original Y position before movement
-        const originalY = enemy.mesh.position.y;
-        enemy.mesh.position.add(movement);
-        // Restore Y position to prevent sinking/floating
-        enemy.mesh.position.y = originalY;
+            // Store original Y position before movement
+            const originalY = enemy.mesh.position.y;
+            enemy.mesh.position.add(movement);
+            // Restore Y position to prevent sinking/floating
+            enemy.mesh.position.y = originalY;
+        }
 
-        // Magnetic enemy pulls player
-        if (enemy.type === 'magnetic') {
+        // Magnetic enemy pulls player (skip if frozen)
+        if (!isFrozen && enemy.type === 'magnetic') {
             const pullRange = 50;
             const pullStrength = 0.5;
             if (enemy.mesh.position.distanceTo(playerCone.position) < pullRange) {
@@ -552,12 +685,15 @@ function updateEnemies(delta) {
         }
 
         // Rotate enemy to face player (only on Y-axis to prevent tilting into ground)
-        const targetPosition = new THREE.Vector3(
-            playerCone.position.x,
-            enemy.mesh.position.y,
-            playerCone.position.z
-        );
-        enemy.mesh.lookAt(targetPosition);
+        // Skip rotation if frozen (rotation is locked)
+        if (!isFrozen) {
+            const targetPosition = new THREE.Vector3(
+                playerCone.position.x,
+                enemy.mesh.position.y,
+                playerCone.position.z
+            );
+            enemy.mesh.lookAt(targetPosition);
+        }
     }
 }
 
@@ -937,15 +1073,100 @@ function updateCamera() {
 }
 
 /**
+ * Shows the ability selection popup after boss kill
+ */
+function showAbilitySelectionPopup() {
+    const unownedAbilities = playerAbilitySystem.getUnownedAbilities();
+
+    // If no more abilities to unlock, skip
+    if (unownedAbilities.length === 0) {
+        console.log('All abilities already unlocked!');
+        return;
+    }
+
+    // Pause game
+    isGamePaused = true;
+
+    // Get overlay and options container
+    const overlay = document.getElementById('ability-selection-overlay');
+    const optionsContainer = document.getElementById('ability-options');
+
+    // Clear previous options
+    optionsContainer.innerHTML = '';
+
+    // Randomly select up to 3 abilities to offer
+    const offeredCount = Math.min(3, unownedAbilities.length);
+    const shuffled = [...unownedAbilities].sort(() => Math.random() - 0.5);
+    const offeredAbilities = shuffled.slice(0, offeredCount);
+
+    // Create ability cards
+    offeredAbilities.forEach(abilityId => {
+        const def = ABILITY_DEFINITIONS[abilityId];
+        const card = document.createElement('div');
+        card.className = 'ability-card';
+        card.innerHTML = `
+            <div class="ability-icon">${def.icon}</div>
+            <div class="ability-name">${def.name}</div>
+            <div class="ability-description">${def.description}</div>
+            <div class="ability-cooldown">Cooldown: ${def.baseCooldown}s</div>
+        `;
+
+        card.addEventListener('click', () => {
+            playerAbilitySystem.unlockAbility(abilityId);
+            hideAbilitySelectionPopup();
+            AudioManager.play('powerup', 1.0);
+        });
+
+        optionsContainer.appendChild(card);
+    });
+
+    // Show overlay
+    overlay.classList.add('visible');
+}
+
+/**
+ * Hides the ability selection popup
+ */
+function hideAbilitySelectionPopup() {
+    const overlay = document.getElementById('ability-selection-overlay');
+    overlay.classList.remove('visible');
+    isGamePaused = false;
+}
+
+/**
  * Checks for game over condition
  */
 function checkGameOver() {
     if (playerHealth <= 0 && !isGameOver) {
         isGameOver = true;
         window.isGameOver = true; // For input system
-        document.getElementById('game-over-screen').classList.add('visible');
-        document.getElementById('final-score').textContent = score;
-        document.getElementById('final-level').textContent = level;
+
+        console.log('GAME OVER - Player died');
+
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const finalScore = document.getElementById('final-score');
+        const finalLevel = document.getElementById('final-level');
+
+        if (!gameOverScreen) {
+            console.error('ERROR: game-over-screen element not found!');
+            return;
+        }
+
+        // Close any open overlays first
+        const levelUpOverlay = document.getElementById('level-up-overlay');
+        const abilityOverlay = document.getElementById('ability-selection-overlay');
+        if (levelUpOverlay) levelUpOverlay.classList.remove('visible');
+        if (abilityOverlay) abilityOverlay.classList.remove('visible');
+
+        gameOverScreen.classList.add('visible');
+
+        if (finalScore) finalScore.textContent = score;
+        if (finalLevel) finalLevel.textContent = level;
+
+        console.log('Game over screen should now be visible');
+        console.log('classList:', gameOverScreen.classList.toString());
+        console.log('display style:', window.getComputedStyle(gameOverScreen).display);
+
         AudioManager.play('gameOver', 1.0);
         inputSystem.clearKeyStates();
         inputSystem.clearDragVisuals();
@@ -988,6 +1209,27 @@ function animate() {
             playerStats,
             playerBuffs
         });
+
+        // Update player abilities
+        const abilityState = {
+            playerCone,
+            playerStats,
+            enemies,
+            blasterShots,
+            acidGrenades,
+            acidPools,
+            lightningStrikes,
+            temporaryEffects,
+            scene,
+            DamageNumberManager: damageNumberManager,
+            AreaWarningManager,
+            isGameOver,
+            isGamePaused
+        };
+        playerAbilitySystem.updateAbilities(abilityState);
+        playerAbilitySystem.updateAcidGrenades(abilityState, delta);
+        playerAbilitySystem.updateAcidPools(abilityState, delta);
+        playerAbilitySystem.updateLightningStrikes(abilityState);
 
         // Update enemy projectiles
         const projectileState = {
@@ -1120,7 +1362,12 @@ function resetGame() {
     // Reset player
     playerCone.position.set(0, 1.5, 0);
     playerCone.scale.set(1, 1, 1);
-    playerCone.rotation.set(Math.PI, 0, 0);
+    playerCone.rotation.set(0, 0, 0);
+
+    // Reset player material colors
+    playerCone.material.color.copy(playerConeOriginalColor);
+    playerCone.material.emissive.setHex(0x00ff00);
+    playerCone.material.emissiveIntensity = 0.4;
 
     // Reset player stats
     resetPlayerStats(playerStats);
@@ -1221,6 +1468,26 @@ function resetGame() {
         objectPools.relicProjectiles.release(proj);
     }
     relicProjectiles.length = 0;
+
+    // Clear ability entities
+    for (const grenade of acidGrenades) {
+        scene.remove(grenade.mesh);
+        grenade.mesh.geometry.dispose();
+        grenade.mesh.material.dispose();
+    }
+    acidGrenades.length = 0;
+
+    for (const pool of acidPools) {
+        scene.remove(pool.mesh);
+        pool.mesh.geometry.dispose();
+        pool.mesh.material.dispose();
+    }
+    acidPools.length = 0;
+
+    lightningStrikes.length = 0;
+
+    // Reset abilities (optional - comment out to keep abilities between games)
+    // playerAbilitySystem.devClearAbilities();
 
     // Reset enemy counts
     for (const key in enemyCounts) {

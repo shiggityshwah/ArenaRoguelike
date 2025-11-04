@@ -90,7 +90,11 @@ export function spawnSpecificEnemy(type, isBoss = false, dependencies) {
     enemyMesh.scale.set(scale, scale, scale);
 
     // All enemies spawn at consistent Y height (matches reference implementation)
-    const yPosition = 5 * scale;
+    // Tanks need extra height due to BoxGeometry being 25 units tall
+    let yPosition = 5 * scale;
+    if (type === 'tank') {
+        yPosition = 12.5 * scale; // Half the box height to sit on ground
+    }
 
     let x, z, attempts = 0;
     do {
