@@ -126,7 +126,14 @@ export function handleEnemyDeath(enemy, dependencies) {
         enemy.wireframe.material.dispose();
     }
     // All enemy materials are unique clones or new instances, so they can be disposed.
-    if (enemy.mesh.material) enemy.mesh.material.dispose();
+    // Handle both single material and array of materials (e.g., Cube King)
+    if (enemy.mesh.material) {
+        if (Array.isArray(enemy.mesh.material)) {
+            enemy.mesh.material.forEach(mat => mat.dispose());
+        } else {
+            enemy.mesh.material.dispose();
+        }
+    }
 
     enemyCounts[enemy.type]--;
 

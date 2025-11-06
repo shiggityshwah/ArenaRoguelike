@@ -4,6 +4,13 @@
 // Development mode - enables ability testing hotkeys (1-4)
 export const DEV_MODE = true;
 
+// Arena size constants
+export const ARENA_SIZE = 2000; // Total arena width/length
+export const ARENA_HALF_SIZE = 1000; // Half arena size (for -X to +X calculations)
+export const ARENA_PLAYABLE_HALF_SIZE = 980; // Slightly smaller than arena to account for wall thickness
+export const WALL_HEIGHT = 100;
+export const WALL_THICKNESS = 40;
+
 export const INITIAL_ENEMY_COUNT = 10;
 export const BASE_PLAYER_SPEED = 0.5;
 export const BASE_PLAYER_RADIUS = 1.5;
@@ -12,6 +19,12 @@ export const BASE_OCTAHEDRON_COOLDOWN = 2.5;
 export const MAX_ENEMIES_TOTAL = 20;
 export const MAX_BOSSES = 3;
 export const MIN_BOX_RATIO = 0.6;
+
+// Wave + Trickle Spawn System Constants
+export const WAVE_INITIAL_SPAWN_COUNT = 8;  // Enemies spawned at wave start
+export const TRICKLE_SPAWN_INTERVAL = 2.5;  // Seconds between trickle spawns
+export const TRICKLE_DURING_BOSS = true;    // Enable trickle during boss fights
+export const BOSS_WAVE_ENEMY_COUNT = 4;     // Enemies spawned with boss
 
 export const RELIC_SPAWN_Y = 400;
 export const MAX_RELICS = 20;

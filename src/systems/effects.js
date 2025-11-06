@@ -264,6 +264,16 @@ export function updateTemporaryEffects(temporaryEffects, clock, scene, delta) {
             }
             // Fade out
             effect.mesh.material.opacity = 1.0 - progress;
+        } else if (effect.type === 'summoningComplete') {
+            // Expanding sphere that fades out
+            const scale = effect.initialScale + progress * 2.5;
+            effect.mesh.scale.set(scale, scale, scale);
+            effect.mesh.material.opacity = 0.8 * (1.0 - progress);
+        } else if (effect.type === 'groundWave') {
+            // Expanding ground wave
+            const scale = effect.initialScale + progress * 3.0;
+            effect.mesh.scale.set(scale, scale, 1);
+            effect.mesh.material.opacity = 0.8 * (1.0 - progress);
         }
     }
 }

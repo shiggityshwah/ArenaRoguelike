@@ -20,7 +20,7 @@ import { BASE_PLAYER_RADIUS, INITIAL_ENEMY_COUNT, MAX_ENEMIES_TOTAL } from '../c
 
 // Stat upgrade pool configuration
 const statUpgradePool = {
-    common: ['damage', 'attackSpeed', 'maxHealth', 'critChance', 'regenRate', 'armor', 'pierceCount', 'areaDamageRadius', 'luck', 'dodgeChance', 'pickupRadius']
+    common: ['damage', 'attackSpeed', 'maxHealth', 'critChance', 'regenRate', 'armor', 'pierceCount', 'AOERadius', 'luck', 'dodgeChance', 'pickupRadius']
 };
 
 // Quality tier definitions for upgrade visuals
@@ -102,10 +102,8 @@ export function levelUp(state) {
     // Apply automatic damage bonus
     playerStats.damage += 3;
 
-    // Update all existing enemies with the new speed
-    for (const enemy of enemies) {
-        enemy.speed = enemy.baseSpeed * newGameSpeedMultiplier;
-    }
+    // Note: No need to update enemy speeds - gameSpeedMultiplier is applied
+    // through gameDelta each frame in the main game loop
 
     // Show upgrade popup
     showLevelUpPopup(state);
@@ -194,7 +192,7 @@ export function getUpgradeOptions(count, playerStats) {
                 value = 1 + Math.floor(normalizedValue * 1);
                 text = `+${value} Pierce`;
                 break;
-            case 'areaDamageRadius':
+            case 'AOERadius':
                 value = 5 + Math.floor(normalizedValue * 10);
                 text = `+${value} AoE`;
                 break;
@@ -258,8 +256,8 @@ export function applyUpgrade(option, dependencies) {
         case 'pierceCount':
             playerStats.pierceCount = Math.min(8, playerStats.pierceCount + option.value);
             break;
-        case 'areaDamageRadius':
-            playerStats.areaDamageRadius = Math.min(100, playerStats.areaDamageRadius + option.value);
+        case 'AOERadius':
+            playerStats.AOERadius = Math.min(100, playerStats.AOERadius + option.value);
             break;
         case 'luck':
             playerStats.luck = Math.min(1.5, playerStats.luck + option.value);
@@ -316,14 +314,51 @@ export function showLevelUpPopup(state) {
     const optionsContainer = document.getElementById('upgrade-options');
     optionsContainer.innerHTML = ''; // Clear previous options
 
+    // Create a row container for upgrade cards
+    const cardsRow = document.createElement('div');
+    cardsRow.className = 'upgrade-cards-row';
+
     options.forEach(option => {
         const button = document.createElement('div');
         button.className = 'upgrade-button';
         const qualityInfo = qualityTiers[option.quality];
-        button.style.backgroundColor = qualityInfo.color;
-        button.style.boxShadow = qualityInfo.boxShadow;
 
-        button.innerHTML = `<span class="stat-name">${option.stat.toUpperCase()}</span><span class="stat-value">${option.text}</span>`;
+        // Set quality color as data attribute for CSS hover effects
+        button.dataset.qualityColor = qualityInfo.color;
+
+        // Create quality badge
+        const qualityBadge = document.createElement('div');
+        qualityBadge.className = 'quality-badge';
+        qualityBadge.textContent = '★';
+        qualityBadge.style.backgroundColor = qualityInfo.color;
+        qualityBadge.style.boxShadow = qualityInfo.boxShadow;
+
+        // Create stat name with quality color
+        const statName = document.createElement('span');
+        statName.className = 'stat-name';
+        statName.textContent = option.stat.toUpperCase();
+        statName.style.color = qualityInfo.color;
+        statName.style.textShadow = `0 0 10px ${qualityInfo.color}`;
+
+        // Create stat value
+        const statValue = document.createElement('span');
+        statValue.className = 'stat-value';
+        statValue.textContent = option.text;
+
+        button.appendChild(statName);
+        button.appendChild(statValue);
+        button.appendChild(qualityBadge);
+
+        // Add hover effect with quality color
+        button.addEventListener('mouseenter', () => {
+            button.style.borderColor = qualityInfo.color;
+            button.style.boxShadow = `0 10px 30px ${qualityInfo.color}`;
+        });
+
+        button.addEventListener('mouseleave', () => {
+            button.style.borderColor = '#ffffff';
+            button.style.boxShadow = '';
+        });
 
         const onSelect = () => {
             applyUpgrade(option, state);
@@ -332,15 +367,24 @@ export function showLevelUpPopup(state) {
         button.addEventListener('click', onSelect);
         button.addEventListener('touchend', (e) => { e.preventDefault(); onSelect(); });
 
-        optionsContainer.appendChild(button);
+        cardsRow.appendChild(button);
     });
+
+    optionsContainer.appendChild(cardsRow);
 
     // Skip Button
     const skipContainer = document.createElement('div');
     skipContainer.id = 'skip-button-container';
+
+    const skipText = document.createElement('div');
+    skipText.id = 'skip-button-text';
+    skipText.textContent = 'HOLD TO SKIP';
+
     const skipProgress = document.createElement('div');
     skipProgress.id = 'skip-button-progress';
+
     skipContainer.appendChild(skipProgress);
+    skipContainer.appendChild(skipText);
     optionsContainer.appendChild(skipContainer);
 
     function skipButtonHoldLoop() {

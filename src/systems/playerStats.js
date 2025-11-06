@@ -15,7 +15,7 @@ export function createPlayerStats() {
         attackDistance: 100,
         projectileSpeed: 3,
         damage: 30,
-        areaDamageRadius: 0,
+        AOERadius: 0,
         pierceCount: 1,
         critChance: 0.05,
         critMultiplier: 2,

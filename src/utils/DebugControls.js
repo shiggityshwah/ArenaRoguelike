@@ -28,7 +28,22 @@ export class DebugControls {
 
             // Update UI if stats changed
             if (this.gameState.updateStatsUI) {
-                this.gameState.updateStatsUI(this.gameState);
+                this.gameState.updateStatsUI();
+            }
+
+            // If maxHealth changed, update health slider max and clamp current health
+            if (statName === 'maxHealth') {
+                if (this.gameState.playerHealth > value) {
+                    this.gameState.playerHealth = value;
+                }
+                // Update health slider in game state panel if it exists
+                const healthSlider = document.getElementById('game-health');
+                const healthValue = document.getElementById('game-health-value');
+                if (healthSlider && healthValue) {
+                    healthSlider.max = value;
+                    healthSlider.value = this.gameState.playerHealth;
+                    healthValue.textContent = Math.round(this.gameState.playerHealth);
+                }
             }
 
             return true;
@@ -113,7 +128,7 @@ export class DebugControls {
             console.log(`Applied preset: ${presetName}`);
 
             if (this.gameState.updateStatsUI) {
-                this.gameState.updateStatsUI(this.gameState);
+                this.gameState.updateStatsUI();
             }
             return true;
         }
@@ -148,7 +163,7 @@ export class DebugControls {
         console.log('Player stats reset to defaults');
 
         if (this.gameState.updateStatsUI) {
-            this.gameState.updateStatsUI(this.gameState);
+            this.gameState.updateStatsUI();
         }
     }
 
@@ -226,33 +241,19 @@ export class DebugControls {
      * Spawn a relic of a specific type
      */
     spawnRelicType(relicType, state = 'idle', nearPlayer = false) {
-        let spawnPosition;
-
-        if (nearPlayer) {
-            const angle = Math.random() * Math.PI * 2;
-            const distance = 50 + Math.random() * 50;
-            spawnPosition = new THREE.Vector3(
-                this.gameState.playerCone.position.x + Math.cos(angle) * distance,
-                100,
-                this.gameState.playerCone.position.z + Math.sin(angle) * distance
-            );
-        } else {
-            spawnPosition = new THREE.Vector3(
-                (Math.random() - 0.5) * 900,
-                100,
-                (Math.random() - 0.5) * 900
-            );
-        }
-
-        const relic = spawnRelic({
-            relicType,
-            spawnPosition,
-            scene: this.gameState.scene,
+        // Call spawnRelic with correct parameters: gemType, nearPlayer, dependencies
+        spawnRelic(relicType, nearPlayer, {
             relics: this.gameState.relics,
+            relicSpawnQueue: this.gameState.relicSpawnQueue,
             relicInfo: this.gameState.relicInfo,
-            gravityWellEffects: this.gameState.gravityWellEffects,
-            createGravityVortex: this.gameState.createGravityVortex
+            scene: this.gameState.scene,
+            playerCone: this.gameState.playerCone,
+            MAX_RELICS: this.gameState.MAX_RELICS || 50,
+            RELIC_SPAWN_Y: this.gameState.RELIC_SPAWN_Y || 100
         });
+
+        // Get the relic that was just spawned (last in the array)
+        const relic = this.gameState.relics[this.gameState.relics.length - 1];
 
         // Set initial state
         if (relic && state !== 'idle') {
@@ -383,7 +384,8 @@ export class DebugControls {
             coins.push({
                 mesh: coinMesh,
                 radius: 3,
-                value: 1
+                value: 1,
+                velocity: new THREE.Vector3()
             });
         }
 
@@ -493,7 +495,7 @@ export class DebugControls {
         console.log(`Level set to ${this.gameState.level}`);
 
         if (this.gameState.updateLevelUI) {
-            this.gameState.updateLevelUI(this.gameState);
+            this.gameState.updateLevelUI();
         }
     }
 
@@ -505,7 +507,7 @@ export class DebugControls {
         console.log(`Added ${amount} XP (total: ${this.gameState.experience})`);
 
         if (this.gameState.updateExperienceBar) {
-            this.gameState.updateExperienceBar(this.gameState);
+            this.gameState.updateExperienceBar();
         }
     }
 
@@ -534,7 +536,7 @@ export class DebugControls {
         console.log(`Score set to ${this.gameState.score}`);
 
         if (this.gameState.updateScoreUI) {
-            this.gameState.updateScoreUI(this.gameState);
+            this.gameState.updateScoreUI();
         }
     }
 
@@ -551,6 +553,8 @@ export class DebugControls {
      */
     setGameSpeed(multiplier) {
         this.gameState.gameSpeedMultiplier = Math.max(0.1, Math.min(5.0, multiplier));
+        // Note: No need to update individual entities - gameSpeedMultiplier is applied
+        // through gameDelta each frame in the main game loop
         console.log(`Game speed set to ${this.gameState.gameSpeedMultiplier}x`);
     }
 
@@ -586,13 +590,12 @@ export class DebugControls {
     }
 
     /**
-     * Set max level (99)
+     * Set max level (100)
      */
     setMaxLevel() {
-        this.setLevel(99);
-        this.gameState.experience = 0;
-        this.gameState.experienceToNextLevel = 99 * 5;
-        console.log('Set to max level (99)');
+        this.setLevel(100);
+        this.gameState.experience = this.gameState.experienceToNextLevel;
+        console.log('Set to max level (100)');
     }
 
     // ===== BOSS CONTROL =====

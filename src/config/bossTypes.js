@@ -390,7 +390,7 @@ const bossTypes = {
           gravityPull: {
             enabled: true,
             range: 100,
-            pullStrength: 1.0,
+            pullStrength: 0.3, // Reduced from 1.0
           },
           orbitAttack: {
             enabled: true,
@@ -413,14 +413,14 @@ const bossTypes = {
           gravityPull: {
             enabled: true,
             range: 150,
-            pullStrength: 1.5,
+            pullStrength: 0.5, // Reduced from 1.5
           },
           gravityZones: {
             enabled: true,
             zoneCount: 3,
             zoneDuration: 8.0,
             zoneRadius: 50,
-            zonePullStrength: 2.0,
+            zonePullStrength: 0.7, // Reduced from 2.0
             respawnInterval: 10.0,
           },
           blackHoleBurst: {
@@ -428,7 +428,7 @@ const bossTypes = {
             cooldown: 10.0,
             telegraphDuration: 2.0,
             pullDuration: 2.0,
-            pullStrength: 3.0,
+            pullStrength: 1.0, // Reduced from 3.0
             explosionRadius: 120,
             explosionDamage: 60,
             knockbackStrength: 5.0,

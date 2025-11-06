@@ -165,14 +165,14 @@ export function createCombatSystem({
                         damageNumberManager.create(enemy.mesh, currentDamage, { isCritical });
 
                         // Area Damage
-                        if (playerStats.areaDamageRadius > 0) {
-                            createExplosion(enemy.mesh.position, playerStats.areaDamageRadius);
+                        if (playerStats.AOERadius > 0) {
+                            createExplosion(enemy.mesh.position, playerStats.AOERadius);
                             const areaDamage = currentDamage * 0.5; // AoE does 50% of primary hit damage
 
                             // Use spatial grid to find victims for AoE damage
                             const aoeVictims = spatialGrid.getNearby({
                                 mesh: { position: enemy.mesh.position },
-                                radius: playerStats.areaDamageRadius
+                                radius: playerStats.AOERadius
                             });
 
                             for (const otherEnemy of aoeVictims) {
@@ -180,7 +180,7 @@ export function createCombatSystem({
                                 if (!otherEnemy.health || otherEnemy === enemy || shot.hitEnemies.includes(otherEnemy)) continue;
 
                                 // Final distance check for accuracy
-                                if (enemy.mesh.position.distanceTo(otherEnemy.mesh.position) < playerStats.areaDamageRadius + otherEnemy.radius) {
+                                if (enemy.mesh.position.distanceTo(otherEnemy.mesh.position) < playerStats.AOERadius + otherEnemy.radius) {
                                     otherEnemy.health -= areaDamage;
                                     damageNumberManager.create(otherEnemy.mesh, areaDamage, { isCritical: false });
                                 }
@@ -302,7 +302,9 @@ export function createCombatSystem({
                     damageNumberManager.create(playerCone, '', { isDodge: true });
                     AudioManager.play('hit', 0.2);
                 } else {
-                    let damageTaken = 5 * (50 / (50 + playerStats.armor));
+                    // Use projectile damage if available, otherwise default to 5
+                    const baseDamage = projectile.damage || 5;
+                    let damageTaken = baseDamage * (50 / (50 + playerStats.armor));
                     if (playerIsBoosted) damageTaken *= relicInfo.speed.damageTakenMultiplier;
 
                     // Check for active shield

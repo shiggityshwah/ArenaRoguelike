@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nImplement comprehensive boss system and debug panel\n\nAdded Boss System:\n- 7 unique boss types with multi-phase mechanics (Cube King, Artillery Tower, Juggernaut, Phantom Blade, Void Core, Warlord, Shade Monarch)\n- 3D floating health bars with phase indicators\n- Wave-based boss spawning (every 5 waves)\n- Boss-specific attack patterns and telegraphs\n- Phase transitions with visual effects\n- Contact damage with cooldown system\n\nAdded Boss Testing System:\n- BossTesting.js for quick boss spawning and testing\n- Keyboard shortcuts (T, B+1-7, K, N)\n- Health multiplier and test mode\n- Boss health/phase monitoring\n\nAdded Comprehensive Debug Panel System:\n- Replaced standalone BossTesting with integrated DebugPanel\n- 8 collapsible panels:\n  * Player Stats (17 sliders with presets)\n  * Enemy Spawn (spawn control, auto-spawn toggle)\n  * Relic Control (spawn, convert, destroy)\n  * Gems & Coins (spawn with auto-collect)\n  * Abilities (unlock/lock all 10 abilities)\n  * Game State (level, XP, health, wave, speed)\n  * Boss Panel (integrated boss testing)\n  * Diagnostics (entity counts, FPS)\n- DebugControls.js for game state manipulation\n- Keyboard shortcuts (T, Ctrl+1-9, Esc)\n- Terminal-style aesthetic\n\nIntegration Changes:\n- Modified main.js to initialize debug panel system\n- Updated combat.js for boss targeting and damage\n- Modified enemySpawning.js for boss spawning\n- Added boss-related constants\n\nBug Fixes:\n- Fixed boss contact damage (reduced by 60%, added cooldown)\n- Fixed boss warning UI (converted to overlay)\n- Fixed auto-targeting to include bosses\n- Fixed game reset to cleanup bosses properly\n- Fixed testing panel boss spawning to bypass level restrictions\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

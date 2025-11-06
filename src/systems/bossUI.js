@@ -326,12 +326,26 @@ export function createPhaseTransitionEffect(scene, bossData, phaseIndex) {
   const bossConfig = bossTypes[bossData.bossType];
   const phase = bossConfig.phases[phaseIndex];
 
-  // Flash effect
-  const originalEmissive = bossData.mesh.material.emissive.getHex();
-  const originalIntensity = bossData.mesh.material.emissiveIntensity;
+  // Flash effect - handle both single and array materials
+  let originalEmissive, originalIntensity;
 
-  bossData.mesh.material.emissive.setHex(0xffffff);
-  bossData.mesh.material.emissiveIntensity = 2.0;
+  if (Array.isArray(bossData.mesh.material)) {
+    // Store first material's values as reference
+    originalEmissive = bossData.mesh.material[0].emissive.getHex();
+    originalIntensity = bossData.mesh.material[0].emissiveIntensity;
+
+    // Flash all materials white
+    bossData.mesh.material.forEach(mat => {
+      mat.emissive.setHex(0xffffff);
+      mat.emissiveIntensity = 2.0;
+    });
+  } else {
+    originalEmissive = bossData.mesh.material.emissive.getHex();
+    originalIntensity = bossData.mesh.material.emissiveIntensity;
+
+    bossData.mesh.material.emissive.setHex(0xffffff);
+    bossData.mesh.material.emissiveIntensity = 2.0;
+  }
 
   // Expanding ring effect
   const ringGeometry = new THREE.RingGeometry(10, 15, 32);
@@ -365,9 +379,16 @@ export function createPhaseTransitionEffect(scene, bossData, phaseIndex) {
       ringGeometry.dispose();
       ringMaterial.dispose();
 
-      // Restore original emissive
-      bossData.mesh.material.emissive.setHex(originalEmissive);
-      bossData.mesh.material.emissiveIntensity = originalIntensity;
+      // Restore original emissive - handle both single and array materials
+      if (Array.isArray(bossData.mesh.material)) {
+        bossData.mesh.material.forEach(mat => {
+          mat.emissive.setHex(originalEmissive);
+          mat.emissiveIntensity = originalIntensity;
+        });
+      } else {
+        bossData.mesh.material.emissive.setHex(originalEmissive);
+        bossData.mesh.material.emissiveIntensity = originalIntensity;
+      }
     }
   };
 

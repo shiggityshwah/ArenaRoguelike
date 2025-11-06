@@ -82,7 +82,7 @@ export function createInputSystem({ renderer, scene }) {
         }
 
         // Store drag start in screen coordinates (for joystick base)
-        dragStartPoint = new THREE.Vector2(x, y);
+        dragStartPoint = new THREE.Vector2(x, y-2);
 
         // Create black dot in screen space (2D overlay instead of 3D)
         dragDot = document.createElement('div');

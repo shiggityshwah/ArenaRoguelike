@@ -29,8 +29,7 @@ export function createGroundWarning(scene, position, radius, duration, color = 0
   });
 
   const ring = new THREE.Mesh(geometry, material);
-  ring.position.copy(position);
-  ring.position.y = 1; // Slightly above ground
+  ring.position.set(position.x, 1, position.z); // Slightly above ground
   ring.rotation.x = Math.PI / 2;
 
   scene.add(ring);
@@ -142,6 +141,18 @@ export function fireSpreadShot(params) {
     projectilePool,
   } = params;
 
+  // Validate position
+  if (!position || typeof position.x !== 'number' || typeof position.z !== 'number' ||
+      isNaN(position.x) || isNaN(position.z)) {
+    console.warn('fireSpreadShot: Invalid position', position);
+    return [];
+  }
+
+  if (!targetPosition || typeof targetPosition.x !== 'number' || typeof targetPosition.z !== 'number') {
+    console.warn('fireSpreadShot: Invalid targetPosition', targetPosition);
+    return [];
+  }
+
   const createdProjectiles = [];
 
   // Calculate direction to target
@@ -152,34 +163,31 @@ export function fireSpreadShot(params) {
 
   const baseAngle = Math.atan2(direction.y, direction.x);
   const arcRadians = (arcDegrees * Math.PI) / 180;
-  const angleStep = arcRadians / (projectileCount - 1);
+  const angleStep = projectileCount > 1 ? arcRadians / (projectileCount - 1) : 0;
   const startAngle = baseAngle - arcRadians / 2;
 
   for (let i = 0; i < projectileCount; i++) {
     const angle = startAngle + angleStep * i;
-    const velocity = new THREE.Vector3(
-      Math.cos(angle) * projectileSpeed,
+
+    // Get projectile from pool
+    const projectileObj = projectilePool.get();
+
+    // Set position at player height (y=2 matches playerCone height)
+    projectileObj.mesh.position.set(position.x, 2, position.z);
+
+    // Set direction (horizontal only, no vertical component)
+    projectileObj.direction.set(
+      Math.cos(angle),
       0,
-      Math.sin(angle) * projectileSpeed
-    );
+      Math.sin(angle)
+    ).normalize();
 
-    const projectile = projectilePool.acquire();
-    projectile.position.copy(position);
-    projectile.position.y = position.y;
+    projectileObj.distanceTraveled = 0;
+    projectileObj.damage = params.damage || 25; // Set damage from params
 
-    projectile.userData.velocity = velocity;
-    projectile.userData.damage = params.damage || 25;
-    projectile.userData.lifetime = params.lifetime || 5.0;
-    projectile.userData.age = 0;
-    projectile.userData.fromEnemy = true;
-
-    projectile.material.color.setHex(projectileColor);
-    projectile.material.emissive.setHex(projectileColor);
-    projectile.scale.setScalar(projectileSize || 1);
-
-    projectiles.push(projectile);
-    scene.add(projectile);
-    createdProjectiles.push(projectile);
+    // Add to projectiles array
+    projectiles.push(projectileObj);
+    createdProjectiles.push(projectileObj);
   }
 
   return createdProjectiles;
@@ -323,13 +331,13 @@ export function createOrbitalProjectiles(params) {
 
     projectile.position.set(
       centerPosition.x + Math.cos(angle) * orbitRadius,
-      centerPosition.y,
+      2, // Match player height
       centerPosition.z + Math.sin(angle) * orbitRadius
     );
 
     projectile.userData.orbitAngle = angle;
     projectile.userData.orbitRadius = orbitRadius;
-    projectile.userData.orbitCenter = centerPosition.clone();
+    projectile.userData.orbitCenter = new THREE.Vector3(centerPosition.x, 2, centerPosition.z); // Use player height
     projectile.userData.damage = params.damage || 20;
 
     scene.add(projectile);
@@ -357,7 +365,7 @@ export function updateOrbitalProjectiles(orbitals, delta, rotationSpeed) {
 
     orbital.position.set(
       orbitCenter.x + Math.cos(orbitAngle) * orbitRadius,
-      orbitCenter.y,
+      2, // Keep at player height
       orbitCenter.z + Math.sin(orbitAngle) * orbitRadius
     );
   });
@@ -372,21 +380,21 @@ export function updateOrbitalProjectiles(orbitals, delta, rotationSpeed) {
 export function launchOrbitalProjectiles(orbitals, speed, projectiles) {
   orbitals.forEach((orbital) => {
     const angle = orbital.userData.orbitAngle || 0;
-    const velocity = new THREE.Vector3(
-      Math.cos(angle) * speed,
+    const direction = new THREE.Vector3(
+      Math.cos(angle),
       0,
-      Math.sin(angle) * speed
-    );
+      Math.sin(angle)
+    ).normalize();
 
-    orbital.userData.velocity = velocity;
-    orbital.userData.lifetime = 5.0;
-    orbital.userData.age = 0;
-    orbital.userData.fromEnemy = true;
-    delete orbital.userData.orbitAngle;
-    delete orbital.userData.orbitRadius;
-    delete orbital.userData.orbitCenter;
+    // Convert orbital mesh to projectile format
+    const projectile = {
+      mesh: orbital,
+      direction: direction,
+      distanceTraveled: 0,
+      damage: orbital.userData.damage || 20,
+    };
 
-    projectiles.push(orbital);
+    projectiles.push(projectile);
   });
 }
 
@@ -570,8 +578,7 @@ export function createGroundHazard(params) {
   });
 
   const hazard = new THREE.Mesh(geometry, material);
-  hazard.position.copy(position);
-  hazard.position.y = 0.5;
+  hazard.position.set(position.x, 0.5, position.z); // Ensure ground level
   hazard.rotation.x = Math.PI / 2;
 
   scene.add(hazard);
@@ -580,7 +587,7 @@ export function createGroundHazard(params) {
   let active = true;
 
   return {
-    position: position.clone(),
+    position: new THREE.Vector3(position.x, 0, position.z), // Store ground-level position
     radius,
     damagePerSecond,
     update(delta) {
@@ -636,8 +643,7 @@ export function createGravityZone(params) {
   });
 
   const outerRing = new THREE.Mesh(outerGeometry, outerMaterial);
-  outerRing.position.copy(position);
-  outerRing.position.y = 1;
+  outerRing.position.set(position.x, 1, position.z); // Lock to ground level
   outerRing.rotation.x = Math.PI / 2;
 
   // Inner circle
@@ -650,8 +656,7 @@ export function createGravityZone(params) {
   });
 
   const innerCircle = new THREE.Mesh(innerGeometry, innerMaterial);
-  innerCircle.position.copy(position);
-  innerCircle.position.y = 1.1;
+  innerCircle.position.set(position.x, 1.1, position.z); // Lock to ground level
   innerCircle.rotation.x = Math.PI / 2;
 
   scene.add(outerRing);
@@ -661,7 +666,7 @@ export function createGravityZone(params) {
   let active = true;
 
   return {
-    position: position.clone(),
+    position: new THREE.Vector3(position.x, 0, position.z), // Store ground-level position
     radius,
     pullStrength,
     update(delta) {

@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import bossTypes, { calculateBossHealth } from '../config/bossTypes.js';
 import enemyTypes from '../config/enemyTypes.js';
 import * as BossAttacks from './bossAttacks.js';
+import { ARENA_PLAYABLE_HALF_SIZE } from '../config/constants.js';
 
 let nextBossId = 1;
 
@@ -38,21 +39,87 @@ export function createBoss(params) {
     return null;
   }
 
-  // Create geometry
-  const geometry = typeof enemyConfig.geometry === 'function'
-    ? enemyConfig.geometry()
-    : enemyConfig.geometry.clone();
+  // Create geometry with special handling for Cube King
+  let mesh;
 
-  // Create material with boss colors
-  const material = new THREE.MeshStandardMaterial({
-    color: bossConfig.color,
-    emissive: bossConfig.emissiveColor || bossConfig.color,
-    emissiveIntensity: bossConfig.emissiveIntensity || 0.5,
-    metalness: 0.5,
-    roughness: 0.5,
-  });
+  if (bossType === 'box' && bossConfig.hasCrown) {
+    // Create Cube King with colorful faces
+    const geometry = new THREE.BoxGeometry(10, 10, 10);
 
-  const mesh = new THREE.Mesh(geometry, material);
+    // Create array of materials for each face with random box enemy colors
+    const materials = [];
+    for (let i = 0; i < 6; i++) {
+      const faceColor = new THREE.Color().setHSL(0.1 + Math.random() * 0.8, 1, 0.5);
+      materials.push(new THREE.MeshStandardMaterial({
+        color: faceColor,
+        emissive: faceColor,
+        emissiveIntensity: 0.5,
+        metalness: 0.3,
+        roughness: 0.6,
+      }));
+    }
+
+    mesh = new THREE.Mesh(geometry, materials);
+
+    // Add golden crown on top
+    const crownGroup = new THREE.Group();
+
+    // Crown base (ring)
+    const crownBaseGeometry = new THREE.CylinderGeometry(6, 7, 2, 8);
+    const crownMaterial = new THREE.MeshStandardMaterial({
+      color: bossConfig.crownColor || 0xFFD700,
+      emissive: bossConfig.crownColor || 0xFFD700,
+      emissiveIntensity: 0.8,
+      metalness: 0.9,
+      roughness: 0.1,
+    });
+    const crownBase = new THREE.Mesh(crownBaseGeometry, crownMaterial);
+    crownBase.position.y = 6;
+    crownGroup.add(crownBase);
+
+    // Crown spikes (8 points around the crown)
+    for (let i = 0; i < 8; i++) {
+      const angle = (Math.PI * 2 * i) / 8;
+      const spikeGeometry = new THREE.ConeGeometry(1, 4, 4);
+      const spike = new THREE.Mesh(spikeGeometry, crownMaterial);
+      spike.position.set(
+        Math.cos(angle) * 6.5,
+        9,
+        Math.sin(angle) * 6.5
+      );
+      crownGroup.add(spike);
+    }
+
+    // Center jewel
+    const jewelGeometry = new THREE.SphereGeometry(1.5, 16, 16);
+    const jewelMaterial = new THREE.MeshStandardMaterial({
+      color: 0xFF0000,
+      emissive: 0xFF0000,
+      emissiveIntensity: 1.0,
+      metalness: 0.9,
+      roughness: 0.1,
+    });
+    const jewel = new THREE.Mesh(jewelGeometry, jewelMaterial);
+    jewel.position.y = 10;
+    crownGroup.add(jewel);
+
+    mesh.add(crownGroup);
+  } else {
+    // Standard boss creation
+    const geometry = typeof enemyConfig.geometry === 'function'
+      ? enemyConfig.geometry()
+      : enemyConfig.geometry.clone();
+
+    const material = new THREE.MeshStandardMaterial({
+      color: bossConfig.color,
+      emissive: bossConfig.emissiveColor || bossConfig.color,
+      emissiveIntensity: bossConfig.emissiveIntensity || 0.5,
+      metalness: 0.5,
+      roughness: 0.5,
+    });
+
+    mesh = new THREE.Mesh(geometry, material);
+  }
 
   // Position and scale
   mesh.position.copy(spawnPosition);
@@ -63,6 +130,16 @@ export function createBoss(params) {
   // Calculate stats
   const maxHealth = calculateBossHealth(bossType, waveNumber);
   const baseSpeed = enemyConfig.baseSpeed + (level || 0) * (enemyConfig.speedLevelScale || 0.01);
+
+  // Calculate ground Y position based on boss type
+  let groundY = 10; // Default for most bosses
+  if (bossType === 'box' || bossType === 'tank') {
+    groundY = 5 * bossConfig.scale; // BoxGeometry sits on ground (half height of 10)
+  } else if (bossType === 'shooter') {
+    groundY = 8 * bossConfig.scale; // Cylinder height/2
+  } else {
+    groundY = 10 * bossConfig.scale; // Most geometries
+  }
 
   // Create boss entity
   const boss = {
@@ -75,6 +152,8 @@ export function createBoss(params) {
     contactDamage: bossConfig.contactDamage,
     level: level || 1,
     waveNumber: waveNumber || 1,
+    groundY, // Store ground level for locking Y position
+    isActive: false, // Will be set to true after spawning animation
 
     // Phase system
     currentPhase: 0,
@@ -251,13 +330,13 @@ function updateSpawnAnimation(boss, delta) {
 
   if (progress >= 1.0) {
     boss.spawning = false;
-    boss.mesh.position.y = 0;
+    boss.mesh.position.y = boss.groundY;
     boss.state = 'idle';
+    boss.isActive = true; // Boss is now active and can be targeted
   } else {
     // Fall from sky
     const startY = 200;
-    const endY = 0;
-    boss.mesh.position.y = startY + (endY - startY) * easeOutBounce(progress);
+    boss.mesh.position.y = startY + (boss.groundY - startY) * easeOutBounce(progress);
 
     // Rotate while falling
     boss.mesh.rotation.y += delta * 3;
@@ -319,8 +398,9 @@ function transitionToPhase(boss, phaseIndex, gameState) {
     boss.isInvulnerable = false;
   }, 500);
 
-  // Clear active attacks
+  // Clear active attacks and reset cooldown
   boss.activeAttacks = [];
+  boss.attackCooldown = 0; // Reset attack cooldown on phase transition
 
   // Handle phase-specific onPhaseStart behaviors
   const behaviors = boss.phaseData.behaviors;
@@ -337,17 +417,25 @@ function transitionToPhase(boss, phaseIndex, gameState) {
     // Armor break effect
     if (onStart.effect === 'armorBreak') {
       // Visual: Make boss darker/battle-worn
-      boss.mesh.material.roughness = 0.8;
+      if (Array.isArray(boss.mesh.material)) {
+        boss.mesh.material.forEach(mat => mat.roughness = 0.8);
+      } else {
+        boss.mesh.material.roughness = 0.8;
+      }
     }
 
     // Spawn clones
     if (onStart.effect === 'spawnClones') {
-      spawnBossClones(boss, onStart.cloneCount, onStart.cloneHealth, gameState);
+      const clones = spawnBossClones(boss, onStart.cloneCount, onStart.cloneHealth, gameState);
+      boss.clones.push(...clones);
+      console.log(`Spawned ${clones.length} afterimage clones for ${boss.name}`);
     }
 
     // Spawn phantom clones
     if (onStart.effect === 'spawnPhantomClones') {
-      spawnPhantomClones(boss, onStart.cloneCount, onStart.cloneHealth, gameState);
+      const clones = spawnPhantomClones(boss, onStart.cloneCount, onStart.cloneHealth, gameState);
+      boss.clones.push(...clones);
+      console.log(`Spawned ${clones.length} phantom clones for ${boss.name}`);
     }
 
     // Deploy weapon platforms
@@ -379,8 +467,15 @@ function transitionToPhase(boss, phaseIndex, gameState) {
 
   // Color shift
   if (boss.phaseData.colorShift) {
-    boss.mesh.material.color.setHex(boss.phaseData.colorShift);
-    boss.mesh.material.emissive.setHex(boss.phaseData.colorShift);
+    if (Array.isArray(boss.mesh.material)) {
+      boss.mesh.material.forEach(mat => {
+        mat.color.setHex(boss.phaseData.colorShift);
+        mat.emissive.setHex(boss.phaseData.colorShift);
+      });
+    } else {
+      boss.mesh.material.color.setHex(boss.phaseData.colorShift);
+      boss.mesh.material.emissive.setHex(boss.phaseData.colorShift);
+    }
   }
 
   // Update maintain distance
@@ -466,6 +561,8 @@ function updateBossMovement(boss, playerPos, distance, delta) {
 
   // Stationary bosses (Void Core Phase 2)
   if (phaseData.moveSpeedMultiplier === 0) {
+    // Still lock to ground even when stationary
+    boss.mesh.position.y = boss.groundY;
     return;
   }
 
@@ -476,10 +573,12 @@ function updateBossMovement(boss, playerPos, distance, delta) {
     if (distance < boss.maintainDistance - 20) {
       // Move away from player
       const direction = new THREE.Vector3().subVectors(bossPos, playerPos).normalize();
+      direction.y = 0; // Lock to horizontal plane
       boss.mesh.position.add(direction.multiplyScalar(moveSpeed * delta * 60));
     } else if (distance > boss.maintainDistance + 20) {
       // Move toward player
       const direction = new THREE.Vector3().subVectors(playerPos, bossPos).normalize();
+      direction.y = 0; // Lock to horizontal plane
       boss.mesh.position.add(direction.multiplyScalar(moveSpeed * delta * 60));
     }
     // Otherwise, strafe around player
@@ -494,7 +593,7 @@ function updateBossMovement(boss, playerPos, distance, delta) {
 
       boss.mesh.position.set(
         playerPos.x + offset.x,
-        bossPos.y,
+        boss.groundY,
         playerPos.z + offset.z
       );
     }
@@ -502,8 +601,16 @@ function updateBossMovement(boss, playerPos, distance, delta) {
   // Chase player (melee bosses)
   else if (distance > 30) {
     const direction = new THREE.Vector3().subVectors(playerPos, bossPos).normalize();
+    direction.y = 0; // Lock to horizontal plane
     boss.mesh.position.add(direction.multiplyScalar(moveSpeed * delta * 60));
   }
+
+  // Keep boss within arena bounds
+  boss.mesh.position.x = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, boss.mesh.position.x));
+  boss.mesh.position.z = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, boss.mesh.position.z));
+
+  // Always lock Y position to ground level
+  boss.mesh.position.y = boss.groundY;
 }
 
 /**
@@ -592,38 +699,541 @@ function executeBoxKingAttack(boss, behaviors, gameState) {
   }
 }
 
-// Note: Additional boss attack implementations will be added similarly
-// For brevity, I'm including stubs that can be expanded
-
+/**
+ * Execute Artillery Tower attacks - Rotates through attack patterns
+ */
 function executeArtilleryTowerAttack(boss, behaviors, gameState) {
-  // Rotate through attack patterns
-  // Implementation follows similar pattern to Box King
-  boss.attackCooldown = 6.0;
+  const { scene, playerCone, enemyProjectiles, objectPools } = gameState;
+
+  // Don't attack during spawn animation or if boss/player aren't ready
+  if (boss.spawning || !boss.mesh || !boss.mesh.position || !playerCone || !playerCone.position) {
+    boss.attackCooldown = 1.0; // Set cooldown even on early return
+    return;
+  }
+
+  // Cycle through available attack patterns
+  if (!boss.currentAttackPattern) {
+    boss.currentAttackPattern = 0;
+  }
+
+  const availablePatterns = [];
+  if (behaviors.spreadPattern && behaviors.spreadPattern.enabled) availablePatterns.push('spreadPattern');
+  if (behaviors.burstShot && behaviors.burstShot.enabled) availablePatterns.push('burstShot');
+  if (behaviors.rotatingBarrage && behaviors.rotatingBarrage.enabled) availablePatterns.push('rotatingBarrage');
+  if (behaviors.laserBeam && behaviors.laserBeam.enabled) availablePatterns.push('laserBeam');
+
+  if (availablePatterns.length === 0) {
+    console.warn(`Artillery Tower: No available patterns! Phase: ${boss.currentPhase}, behaviors:`, behaviors);
+    boss.attackCooldown = 2.0;
+    return;
+  }
+
+  console.log(`Artillery Tower attack: Pattern ${boss.currentAttackPattern}, Available:`, availablePatterns);
+
+  const currentPattern = availablePatterns[boss.currentAttackPattern % availablePatterns.length];
+
+  // Execute pattern
+  if (currentPattern === 'spreadPattern') {
+    BossAttacks.fireSpreadShot({
+      scene,
+      position: boss.mesh.position,
+      targetPosition: playerCone.position,
+      projectileCount: behaviors.spreadPattern.projectileCount,
+      arcDegrees: behaviors.spreadPattern.arcDegrees,
+      projectileSpeed: behaviors.spreadPattern.projectileSpeed,
+      projectileColor: 0x8A2BE2,
+      projectileSize: 1.5,
+      damage: 25,
+      projectiles: enemyProjectiles,
+      projectilePool: objectPools.enemyProjectiles,
+    });
+    boss.attackCooldown = 2.0;
+  }
+  else if (currentPattern === 'burstShot') {
+    // Fire 5 projectiles in a row
+    for (let i = 0; i < behaviors.burstShot.projectileCount; i++) {
+      setTimeout(() => {
+        if (boss.isActive) {
+          BossAttacks.fireSpreadShot({
+            scene,
+            position: boss.mesh.position,
+            targetPosition: playerCone.position,
+            projectileCount: 1,
+            arcDegrees: 0,
+            projectileSpeed: behaviors.burstShot.projectileSpeed,
+            projectileColor: 0x9370DB,
+            projectileSize: 1.2,
+            damage: 20,
+            projectiles: enemyProjectiles,
+            projectilePool: objectPools.enemyProjectiles,
+          });
+        }
+      }, i * (behaviors.burstShot.delayBetweenShots * 1000));
+    }
+    boss.attackCooldown = 3.0;
+  }
+  else if (currentPattern === 'rotatingBarrage') {
+    BossAttacks.fireSpreadShot({
+      scene,
+      position: boss.mesh.position,
+      targetPosition: playerCone.position,
+      projectileCount: behaviors.rotatingBarrage.projectileCount,
+      arcDegrees: 360,
+      projectileSpeed: behaviors.rotatingBarrage.projectileSpeed,
+      projectileColor: 0xBA55D3,
+      projectileSize: 1.3,
+      damage: 22,
+      projectiles: enemyProjectiles,
+      projectilePool: objectPools.enemyProjectiles,
+    });
+    boss.attackCooldown = 2.5;
+  }
+  else if (currentPattern === 'laserBeam') {
+    // Simplified laser - just fire a tight beam of projectiles
+    BossAttacks.fireSpreadShot({
+      scene,
+      position: boss.mesh.position,
+      targetPosition: playerCone.position,
+      projectileCount: 5,
+      arcDegrees: 5,
+      projectileSpeed: 5.0,
+      projectileColor: 0xff0000,
+      projectileSize: 2,
+      damage: 40,
+      projectiles: enemyProjectiles,
+      projectilePool: objectPools.enemyProjectiles,
+    });
+    boss.attackCooldown = 4.0;
+  }
+
+  // Move to next pattern
+  boss.currentAttackPattern = (boss.currentAttackPattern + 1) % availablePatterns.length;
 }
 
+/**
+ * Execute Juggernaut attacks - Ground slam and shoulder charge
+ */
 function executeJuggernautAttack(boss, behaviors, gameState) {
-  // Ground slam or shoulder charge
-  boss.attackCooldown = 8.0;
+  const { scene, playerCone } = gameState;
+
+  // Don't attack during spawn animation
+  if (boss.spawning || !boss.mesh || !boss.mesh.position || !playerCone) {
+    boss.attackCooldown = 1.0;
+    return;
+  }
+
+  // Alternate between ground slam and shoulder charge
+  if (!boss.lastAttackType || boss.lastAttackType === 'charge') {
+    // Ground slam
+    if (behaviors.groundSlam && behaviors.groundSlam.enabled) {
+      const slamData = behaviors.groundSlam;
+
+      // Create ground warning
+      const warning = BossAttacks.createGroundWarning(
+        scene,
+        boss.mesh.position,
+        slamData.radius,
+        slamData.telegraphDuration,
+        0xff0000
+      );
+
+      boss.activeWarnings.push(warning);
+
+      // Execute slam after telegraph
+      setTimeout(() => {
+        if (boss.isActive) {
+          // Damage players in radius (handled in main.js)
+          boss.slamDamageRadius = slamData.radius;
+          boss.slamDamage = slamData.damage;
+          boss.slamActive = true;
+
+          setTimeout(() => {
+            boss.slamActive = false;
+          }, 200); // Brief damage window
+        }
+      }, slamData.telegraphDuration * 1000);
+
+      boss.lastAttackType = 'slam';
+      boss.attackCooldown = slamData.cooldown;
+    }
+  } else {
+    // Shoulder charge
+    if (behaviors.shoulderCharge && behaviors.shoulderCharge.enabled) {
+      const chargeData = behaviors.shoulderCharge;
+
+      // Telegraph
+      const warning = BossAttacks.createGroundWarning(
+        scene,
+        playerCone.position,
+        30,
+        chargeData.telegraphDuration,
+        0xff8800
+      );
+
+      boss.activeWarnings.push(warning);
+
+      // Execute charge
+      setTimeout(() => {
+        if (boss.isActive) {
+          executeChargeAttack(boss, playerCone.position.clone(), chargeData, gameState);
+        }
+      }, chargeData.telegraphDuration * 1000);
+
+      boss.lastAttackType = 'charge';
+      boss.attackCooldown = chargeData.cooldown;
+    }
+  }
 }
 
+/**
+ * Execute Phantom Blade attacks - Dash attack pattern
+ */
 function executePhantomBladeAttack(boss, behaviors, gameState) {
-  // Dash attack pattern
-  boss.attackCooldown = 5.0;
+  const { scene, playerCone } = gameState;
+
+  // Don't attack during spawn animation
+  if (boss.spawning || !boss.mesh || !playerCone) {
+    boss.attackCooldown = 1.0;
+    return;
+  }
+
+  if (behaviors.dashAttack && behaviors.dashAttack.enabled) {
+    const dashData = behaviors.dashAttack;
+
+    // Store original position
+    const startPos = boss.mesh.position.clone();
+
+    // Telegraph glow
+    if (Array.isArray(boss.mesh.material)) {
+      boss.mesh.material.forEach(mat => {
+        mat.emissive.setHex(0xff4500);
+        mat.emissiveIntensity = 3.0;
+      });
+    } else {
+      boss.mesh.material.emissive.setHex(0xff4500);
+      boss.mesh.material.emissiveIntensity = 3.0;
+    }
+
+    // Execute dash sequence
+    let dashesCompleted = 0;
+    const dashInterval = setInterval(() => {
+      if (!boss.isActive || dashesCompleted >= dashData.dashCount) {
+        clearInterval(dashInterval);
+
+        // Reset emissive
+        const bossConfig = bossTypes[boss.bossType];
+        if (boss.mesh && boss.mesh.material) {
+          if (Array.isArray(boss.mesh.material)) {
+            boss.mesh.material.forEach(mat => {
+              mat.emissive.setHex(bossConfig.emissiveColor);
+              mat.emissiveIntensity = bossConfig.emissiveIntensity;
+            });
+          } else {
+            boss.mesh.material.emissive.setHex(bossConfig.emissiveColor);
+            boss.mesh.material.emissiveIntensity = bossConfig.emissiveIntensity;
+          }
+        }
+        return;
+      }
+
+      // Dash to player position
+      const targetPos = playerCone.position.clone();
+      const direction = new THREE.Vector3().subVectors(targetPos, boss.mesh.position).normalize();
+
+      // Create trail hazard
+      if (dashData.trailDamage) {
+        const hazard = BossAttacks.createGroundHazard({
+          scene,
+          position: boss.mesh.position.clone(),
+          radius: 30,
+          duration: dashData.trailDuration,
+          damage: dashData.trailDamage,
+          color: 0xff4500,
+        });
+        boss.activeHazards.push(hazard);
+      }
+
+      // Teleport to near target (lock to ground)
+      const dashDistance = 100;
+      const newPos = targetPos.clone().sub(direction.multiplyScalar(dashDistance));
+      newPos.y = boss.groundY; // Lock to ground
+      boss.mesh.position.copy(newPos);
+
+      dashesCompleted++;
+    }, dashData.dashDelay * 1000);
+
+    boss.attackCooldown = dashData.cooldown;
+  }
 }
 
+/**
+ * Execute Void Core attacks - Orbital projectiles and gravity zones
+ */
 function executeVoidCoreAttack(boss, behaviors, gameState) {
-  // Orbital projectiles and gravity zones
-  boss.attackCooldown = 5.0;
+  const { scene, playerCone, enemyProjectiles, objectPools } = gameState;
+
+  // Don't attack during spawn animation
+  if (boss.spawning || !boss.mesh || !playerCone) {
+    boss.attackCooldown = 1.0;
+    return;
+  }
+
+  // Alternate between orbital attack and gravity zones
+  if (!boss.lastAttackType || boss.lastAttackType === 'gravity') {
+    // Orbital projectiles
+    if (behaviors.orbitAttack && behaviors.orbitAttack.enabled) {
+      const orbitData = behaviors.orbitAttack;
+
+      const orbitals = BossAttacks.createOrbitalProjectiles({
+        scene,
+        centerPosition: boss.mesh.position,
+        orbitRadius: orbitData.orbitRadius || 80,
+        projectileCount: orbitData.projectileCount || 8,
+        orbitSpeed: orbitData.orbitSpeed || 2.0,
+        damage: orbitData.damage || 30,
+        projectileColor: 0x00BFFF, // DeepSkyBlue
+        projectileSize: 2,
+      });
+
+      boss.activeOrbitals.push(...orbitals);
+
+      // Launch after orbit duration
+      setTimeout(() => {
+        if (boss.isActive) {
+          BossAttacks.launchOrbitalProjectiles(
+            boss.activeOrbitals,
+            orbitData.launchSpeed || 3.0,
+            enemyProjectiles
+          );
+          boss.activeOrbitals = [];
+        }
+      }, (orbitData.orbitDuration || 2.0) * 1000);
+
+      boss.lastAttackType = 'orbital';
+      boss.attackCooldown = orbitData.cooldown || 5.0;
+    }
+  } else {
+    // Gravity zones (Phase 2)
+    if (behaviors.gravityZones && behaviors.gravityZones.enabled) {
+      const zoneData = behaviors.gravityZones;
+
+      // Create multiple gravity zones
+      for (let i = 0; i < zoneData.zoneCount; i++) {
+        // Random position near player
+        const angle = Math.random() * Math.PI * 2;
+        const distance = 80 + Math.random() * 100;
+        const zonePos = new THREE.Vector3(
+          playerCone.position.x + Math.cos(angle) * distance,
+          playerCone.position.y,
+          playerCone.position.z + Math.sin(angle) * distance
+        );
+
+        const zone = BossAttacks.createGravityZone({
+          scene,
+          position: zonePos,
+          radius: zoneData.radius,
+          duration: zoneData.duration,
+          pullStrength: zoneData.pullStrength,
+          damage: zoneData.tickDamage,
+          color: 0x0000ff,
+        });
+
+        boss.activeGravityZones.push(zone);
+      }
+
+      boss.lastAttackType = 'gravity';
+      boss.attackCooldown = zoneData.cooldown || 8.0;
+    }
+  }
 }
 
+/**
+ * Execute Warlord attacks - Weapon rotation system
+ */
 function executeWarlordAttack(boss, behaviors, gameState) {
-  // Weapon rotation system
-  boss.attackCooldown = 3.0;
+  const { scene, playerCone, enemyProjectiles, objectPools } = gameState;
+
+  // Don't attack during spawn animation
+  if (boss.spawning || !boss.mesh || !playerCone) {
+    boss.attackCooldown = 1.0;
+    return;
+  }
+
+  // Phase 3: Fire all weapons simultaneously
+  if (behaviors.combinedWeapons && behaviors.combinedWeapons.enabled) {
+    // Fire spread shot
+    if (behaviors.spreadShot) {
+      BossAttacks.fireSpreadShot({
+        scene,
+        position: boss.mesh.position,
+        targetPosition: playerCone.position,
+        projectileCount: behaviors.spreadShot.projectileCount,
+        arcDegrees: behaviors.spreadShot.arcDegrees,
+        projectileSpeed: behaviors.spreadShot.projectileSpeed,
+        projectileColor: 0xff00ff,
+        projectileSize: 1.5,
+        damage: 20,
+        projectiles: enemyProjectiles,
+        projectilePool: objectPools.enemyProjectiles,
+      });
+    }
+
+    // Fire homing missiles - simplified for now
+    if (behaviors.homingMissiles) {
+      BossAttacks.fireSpreadShot({
+        scene,
+        position: boss.mesh.position,
+        targetPosition: playerCone.position,
+        projectileCount: behaviors.homingMissiles.missileCount,
+        arcDegrees: 30,
+        projectileSpeed: behaviors.homingMissiles.missileSpeed,
+        projectileColor: 0xff0000,
+        projectileSize: 2,
+        damage: 25,
+        projectiles: enemyProjectiles,
+        projectilePool: objectPools.enemyProjectiles,
+      });
+    }
+
+    // Fire plasma rain - simplified for now
+    if (behaviors.plasmaRain) {
+      BossAttacks.fireSpreadShot({
+        scene,
+        position: new THREE.Vector3(playerCone.position.x, playerCone.position.y + 100, playerCone.position.z),
+        targetPosition: playerCone.position,
+        projectileCount: behaviors.plasmaRain.projectileCount,
+        arcDegrees: 360,
+        projectileSpeed: behaviors.plasmaRain.fallSpeed || 3,
+        projectileColor: 0x00ff00,
+        projectileSize: 1.5,
+        damage: 30,
+        projectiles: enemyProjectiles,
+        projectilePool: objectPools.enemyProjectiles,
+      });
+    }
+
+    boss.attackCooldown = behaviors.combinedWeapons.cooldown;
+  }
+  // Phases 1 & 2: Weapon rotation
+  else if (behaviors.weaponRotation && behaviors.weaponRotation.enabled) {
+    // Warlord uses different behavior names than Artillery Tower
+    // Map them to spreadPattern for consistency
+    const mappedBehaviors = {
+      spreadPattern: behaviors.spreadShot || behaviors.spreadPattern,
+      burstShot: behaviors.burstShot,
+      rotatingBarrage: behaviors.rotatingBarrage,
+      laserBeam: behaviors.laserBeam
+    };
+    executeArtilleryTowerAttack(boss, mappedBehaviors, gameState);
+  }
+  else {
+    // Fallback - just use spread shot
+    if (behaviors.spreadShot && behaviors.spreadShot.enabled) {
+      BossAttacks.fireSpreadShot({
+        scene,
+        position: boss.mesh.position,
+        targetPosition: playerCone.position,
+        projectileCount: behaviors.spreadShot.projectileCount || 5,
+        arcDegrees: behaviors.spreadShot.arcDegrees || 45,
+        projectileSpeed: behaviors.spreadShot.projectileSpeed || 3.0,
+        projectileColor: 0xFFFF33,
+        projectileSize: 1.5,
+        damage: 20,
+        projectiles: enemyProjectiles,
+        projectilePool: objectPools.enemyProjectiles,
+      });
+      boss.attackCooldown = behaviors.spreadShot.cooldown || 2.0;
+    } else {
+      boss.attackCooldown = 2.0;
+    }
+  }
 }
 
+/**
+ * Execute Shade Monarch attacks - Teleport and projectiles
+ */
 function executeShadeMonarchAttack(boss, behaviors, gameState) {
-  // Teleport and projectiles
-  boss.attackCooldown = 4.0;
+  const { scene, playerCone, enemyProjectiles, objectPools } = gameState;
+
+  // Don't attack during spawn animation
+  if (boss.spawning || !boss.mesh || !playerCone) {
+    boss.attackCooldown = 1.0;
+    return;
+  }
+
+  // Teleport attack
+  if (behaviors.teleport && behaviors.teleport.enabled) {
+    const teleportData = behaviors.teleport;
+
+    // Fade out effect
+    if (boss.mesh.material.opacity > 0.1) {
+      boss.mesh.material.opacity -= 0.1;
+    }
+
+    setTimeout(() => {
+      if (!boss.isActive) return;
+
+      // Teleport to new position
+      const minDist = teleportData.teleportRange[0];
+      const maxDist = teleportData.teleportRange[1];
+      const distance = minDist + Math.random() * (maxDist - minDist);
+      const angle = Math.random() * Math.PI * 2;
+
+      const oldPos = boss.mesh.position.clone();
+      boss.mesh.position.set(
+        playerCone.position.x + Math.cos(angle) * distance,
+        boss.groundY, // Lock to ground
+        playerCone.position.z + Math.sin(angle) * distance
+      );
+
+      // Leave hazard at old position
+      if (teleportData.leaveHazard) {
+        const hazard = BossAttacks.createGroundHazard({
+          scene,
+          position: oldPos,
+          radius: teleportData.hazardRadius,
+          duration: teleportData.hazardDuration,
+          damage: teleportData.hazardDamage,
+          color: 0xffffff,
+        });
+        boss.activeHazards.push(hazard);
+      }
+
+      // Fade back in
+      boss.mesh.material.opacity = 0.4;
+
+      // Fire projectiles on teleport
+      if (behaviors.projectileOnTeleport && behaviors.projectileOnTeleport.enabled) {
+        BossAttacks.fireSpreadShot({
+          scene,
+          position: boss.mesh.position,
+          targetPosition: playerCone.position,
+          projectileCount: behaviors.projectileOnTeleport.projectileCount,
+          arcDegrees: behaviors.projectileOnTeleport.spreadAngle,
+          projectileSpeed: behaviors.projectileOnTeleport.projectileSpeed,
+          projectileColor: 0xffffff,
+          projectileSize: 1.5,
+          damage: 20,
+          projectiles: enemyProjectiles,
+          projectilePool: objectPools.enemyProjectiles,
+        });
+      }
+
+      // Teleport clones too (Phase 2)
+      if (teleportData.clonesAlsoTeleport && boss.clones.length > 0) {
+        boss.clones.forEach((clone, i) => {
+          const cloneAngle = angle + ((Math.PI * 2) / boss.clones.length) * i;
+          clone.mesh.position.set(
+            playerCone.position.x + Math.cos(cloneAngle) * distance,
+            boss.groundY, // Lock clones to ground too
+            playerCone.position.z + Math.sin(cloneAngle) * distance
+          );
+        });
+      }
+    }, 500); // Teleport delay
+
+    boss.attackCooldown = teleportData.cooldown;
+  }
 }
 
 /**
@@ -642,8 +1252,15 @@ function executeChargeAttack(boss, targetPos, chargeData, gameState) {
   };
 
   // Visual: Red glow
-  boss.mesh.material.emissive.setHex(0xff0000);
-  boss.mesh.material.emissiveIntensity = 2.0;
+  if (Array.isArray(boss.mesh.material)) {
+    boss.mesh.material.forEach(mat => {
+      mat.emissive.setHex(0xff0000);
+      mat.emissiveIntensity = 2.0;
+    });
+  } else {
+    boss.mesh.material.emissive.setHex(0xff0000);
+    boss.mesh.material.emissiveIntensity = 2.0;
+  }
 }
 
 /**
@@ -667,18 +1284,32 @@ function updateActiveAttacks(boss, delta) {
     boss.currentAttack.elapsed += delta;
 
     if (boss.currentAttack.type === 'charge') {
-      // Move boss during charge
+      // Move boss during charge (horizontal only)
       const movement = boss.currentAttack.direction.clone().multiplyScalar(
         boss.currentAttack.speed * delta * 60
       );
+      movement.y = 0; // Lock to horizontal plane
       boss.mesh.position.add(movement);
+
+      // Keep boss within arena bounds during charge
+      boss.mesh.position.x = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, boss.mesh.position.x));
+      boss.mesh.position.z = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, boss.mesh.position.z));
+
+      boss.mesh.position.y = boss.groundY; // Ensure ground lock
 
       // End charge
       if (boss.currentAttack.elapsed >= boss.currentAttack.duration) {
-        // Reset emissive
+        // Reset emissive (handle array of materials for Cube King)
         const bossConfig = bossTypes[boss.bossType];
-        boss.mesh.material.emissive.setHex(bossConfig.emissiveColor || bossConfig.color);
-        boss.mesh.material.emissiveIntensity = bossConfig.emissiveIntensity || 0.5;
+        if (Array.isArray(boss.mesh.material)) {
+          // Cube King has multiple materials, reset each face
+          boss.mesh.material.forEach(mat => {
+            mat.emissiveIntensity = 0.5;
+          });
+        } else {
+          boss.mesh.material.emissive.setHex(bossConfig.emissiveColor || bossConfig.color);
+          boss.mesh.material.emissiveIntensity = bossConfig.emissiveIntensity || 0.5;
+        }
 
         boss.currentAttack = null;
       }
@@ -728,30 +1359,217 @@ function applyGravityPull(boss, gameState) {
  */
 
 function spawnMinionForBoss(type, level, position, gameState) {
-  // Import needed - this function will be called with gameState containing spawnSpecificEnemy
-  // For now, we'll disable minion spawning until properly integrated
-  console.log(`[Boss] Would spawn minion: ${type} at level ${level}`);
+  const { spawnSpecificEnemy, scene, enemies, enemyPrototypes, playerCone, enemyCounts, getBossCount, setBossCount, gameSpeedMultiplier, createGravityVortex, gravityWellEffects } = gameState;
+
+  if (!spawnSpecificEnemy) {
+    console.warn('[Boss] spawnSpecificEnemy not available in gameState');
+    return null;
+  }
+
+  // Store initial enemy count
+  const initialCount = enemies.length;
+
+  // Spawn the minion using spawnSpecificEnemy
+  spawnSpecificEnemy(type, false, {
+    scene,
+    enemies,
+    enemyPrototypes,
+    playerCone,
+    enemyCounts,
+    getBossCount: getBossCount || (() => 0),
+    setBossCount: setBossCount || (() => {}),
+    level,
+    gameSpeedMultiplier,
+    createGravityVortex,
+    gravityWellEffects
+  });
+
+  // Get the newly spawned enemy (last in array)
+  if (enemies.length > initialCount) {
+    const minion = enemies[enemies.length - 1];
+
+    // Position is already set by spawnBossMinions (at y=100 to fall)
+    // Don't override it, minions need to fall from sky
+    // The position param already has x/z set correctly, just preserve y
+    if (minion && minion.mesh && position) {
+      // Only update X and Z, keep the spawn Y (100) so they fall
+      minion.mesh.position.x = position.x;
+      minion.mesh.position.z = position.z;
+      // minion.mesh.position.y stays at spawn height (100)
+      return minion;
+    }
+  }
+
   return null;
 }
 
 function spawnBossClones(boss, count, health, gameState) {
   // Create afterimage clones for Phantom Blade
-  console.log(`Spawning ${count} clones for boss ${boss.id}`);
+  const { scene } = gameState;
+  const clones = [];
+
+  for (let i = 0; i < count; i++) {
+    // Create clone geometry (same as boss but semi-transparent)
+    const cloneGeometry = boss.mesh.geometry.clone();
+    const cloneMaterial = new THREE.MeshStandardMaterial({
+      color: boss.mesh.material.color,
+      emissive: boss.mesh.material.emissive,
+      emissiveIntensity: boss.mesh.material.emissiveIntensity * 0.6,
+      transparent: true,
+      opacity: 0.4, // Semi-transparent afterimage
+      flatShading: boss.mesh.material.flatShading
+    });
+
+    const cloneMesh = new THREE.Mesh(cloneGeometry, cloneMaterial);
+    cloneMesh.scale.copy(boss.mesh.scale);
+    cloneMesh.position.copy(boss.mesh.position);
+    cloneMesh.rotation.copy(boss.mesh.rotation);
+
+    scene.add(cloneMesh);
+
+    const clone = {
+      mesh: cloneMesh,
+      health,
+      maxHealth: health,
+      isClone: true,
+      parentBossId: boss.id,
+      radius: boss.radius,
+      contactDamage: boss.contactDamage * 0.7, // Slightly weaker
+      // Movement history for delayed following
+      positionHistory: [],
+      historyMaxLength: 30, // 0.5 seconds at 60 FPS
+    };
+
+    clones.push(clone);
+  }
+
+  return clones;
 }
 
 function spawnPhantomClones(boss, count, health, gameState) {
-  // Create phantom clones for Shade Monarch
-  console.log(`Spawning ${count} phantom clones for boss ${boss.id}`);
+  // Create phantom clones for Shade Monarch (same mechanics as boss)
+  const { scene } = gameState;
+  const clones = [];
+
+  for (let i = 0; i < count; i++) {
+    // Create clone geometry (identical to boss)
+    const cloneGeometry = boss.mesh.geometry.clone();
+    const cloneMaterial = new THREE.MeshStandardMaterial({
+      color: boss.mesh.material.color,
+      emissive: boss.mesh.material.emissive,
+      emissiveIntensity: boss.mesh.material.emissiveIntensity,
+      transparent: true,
+      opacity: boss.mesh.material.opacity || 0.4,
+      flatShading: boss.mesh.material.flatShading
+    });
+
+    const cloneMesh = new THREE.Mesh(cloneGeometry, cloneMaterial);
+    cloneMesh.scale.copy(boss.mesh.scale);
+
+    // Position clones in circle around boss
+    const angle = (Math.PI * 2 * i) / count;
+    const distance = 100;
+    cloneMesh.position.set(
+      boss.mesh.position.x + Math.cos(angle) * distance,
+      boss.mesh.position.y,
+      boss.mesh.position.z + Math.sin(angle) * distance
+    );
+
+    scene.add(cloneMesh);
+
+    const clone = {
+      mesh: cloneMesh,
+      health,
+      maxHealth: health,
+      isPhantomClone: true,
+      parentBossId: boss.id,
+      radius: boss.radius,
+      contactDamage: boss.contactDamage,
+      isInvulnerable: boss.isInvulnerable, // Shares invulnerability state
+      hitsReceived: 0,
+      teleportCooldown: 0,
+    };
+
+    clones.push(clone);
+  }
+
+  return clones;
 }
 
 function deployWeaponPlatforms(boss, config, gameState) {
   // Deploy turret platforms for Warlord
-  console.log(`Deploying ${config.platformCount} weapon platforms`);
+  const { scene } = gameState;
+  const { platformCount, platformHealth, platformSpacing } = config;
+
+  console.log(`Deploying ${platformCount} weapon platforms`);
+
+  const platforms = [];
+  const distance = 180; // Distance from boss
+
+  for (let i = 0; i < platformCount; i++) {
+    // Calculate platform position in circle around boss
+    const angle = (platformSpacing * i * Math.PI) / 180;
+    const position = new THREE.Vector3(
+      boss.mesh.position.x + Math.cos(angle) * distance,
+      boss.mesh.position.y - 10, // Slightly lower than boss
+      boss.mesh.position.z + Math.sin(angle) * distance
+    );
+
+    // Create platform geometry (octahedron - matching elite enemy)
+    const platformGeometry = new THREE.OctahedronGeometry(15);
+    const platformMaterial = new THREE.MeshStandardMaterial({
+      color: 0x808080, // Gray
+      emissive: 0x404040,
+      emissiveIntensity: 0.5,
+      metalness: 0.8,
+      roughness: 0.3,
+    });
+
+    const platformMesh = new THREE.Mesh(platformGeometry, platformMaterial);
+    platformMesh.position.copy(position);
+    scene.add(platformMesh);
+
+    // Assign weapon type based on index
+    const weaponTypes = ['spreadShot', 'homingMissiles', 'plasmaRain'];
+    const weaponType = weaponTypes[i % weaponTypes.length];
+
+    const platform = {
+      mesh: platformMesh,
+      health: platformHealth,
+      maxHealth: platformHealth,
+      isPlatform: true,
+      parentBossId: boss.id,
+      radius: 15,
+      weaponType,
+      lastAttackTime: 0,
+      attackCooldown: 3.0,
+      isActive: true,
+    };
+
+    platforms.push(platform);
+  }
+
+  boss.platforms.push(...platforms);
+  console.log(`Deployed ${platforms.length} weapon platforms`);
 }
 
 function recallWeaponPlatforms(boss, gameState) {
   // Recall platforms for Warlord Phase 3
+  const { scene } = gameState;
+
   console.log('Recalling weapon platforms');
+
+  // Remove all platforms from scene
+  boss.platforms.forEach(platform => {
+    if (platform.mesh) {
+      scene.remove(platform.mesh);
+      platform.mesh.geometry.dispose();
+      platform.mesh.material.dispose();
+    }
+  });
+
+  // Clear platforms array
+  boss.platforms = [];
 }
 
 /**
@@ -793,7 +1611,10 @@ export function bossTakeDamage(boss, damage, gameState) {
   }
 
   // Apply shield reduction (Juggernaut)
-  if (boss.shieldActive && boss.phaseData.behaviors.shieldMechanic) {
+  if (boss.shieldActive && boss.phaseData && boss.phaseData.behaviors && boss.phaseData.behaviors.shieldMechanic &&
+      gameState && gameState.playerCone && gameState.playerCone.position && boss.mesh && boss.mesh.position) {
+    const shieldMechanic = boss.phaseData.behaviors.shieldMechanic;
+
     // Check if hit from front
     const toPlayer = new THREE.Vector3().subVectors(
       gameState.playerCone.position,
@@ -803,25 +1624,40 @@ export function bossTakeDamage(boss, damage, gameState) {
     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(boss.mesh.quaternion);
     const angle = forward.angleTo(toPlayer) * (180 / Math.PI);
 
-    const shieldArc = boss.phaseData.behaviors.shieldMechanic.shieldArc || 120;
+    const shieldArc = shieldMechanic.shieldArc || 120;
 
     if (angle < shieldArc / 2) {
       // Hit shield
-      damage *= (1 - boss.phaseData.behaviors.shieldMechanic.frontDamageReduction);
+      const reduction = shieldMechanic.frontDamageReduction || 0.5;
+      damage *= (1 - reduction);
     }
   }
 
   boss.health -= damage;
   boss.health = Math.max(0, boss.health);
 
-  // Visual feedback
-  boss.mesh.material.emissive.setHex(0xffffff);
-  boss.mesh.material.emissiveIntensity = 2.0;
+  // Visual feedback - white flash on hit
+  if (Array.isArray(boss.mesh.material)) {
+    boss.mesh.material.forEach(mat => {
+      mat.emissive.setHex(0xffffff);
+      mat.emissiveIntensity = 2.0;
+    });
+  } else {
+    boss.mesh.material.emissive.setHex(0xffffff);
+    boss.mesh.material.emissiveIntensity = 2.0;
+  }
 
   setTimeout(() => {
     const bossConfig = bossTypes[boss.bossType];
-    boss.mesh.material.emissive.setHex(bossConfig.emissiveColor || bossConfig.color);
-    boss.mesh.material.emissiveIntensity = bossConfig.emissiveIntensity || 0.5;
+    if (Array.isArray(boss.mesh.material)) {
+      boss.mesh.material.forEach(mat => {
+        mat.emissive.setHex(bossConfig.emissiveColor || bossConfig.color);
+        mat.emissiveIntensity = bossConfig.emissiveIntensity || 0.5;
+      });
+    } else {
+      boss.mesh.material.emissive.setHex(bossConfig.emissiveColor || bossConfig.color);
+      boss.mesh.material.emissiveIntensity = bossConfig.emissiveIntensity || 0.5;
+    }
   }, 100);
 
   return true;
@@ -842,7 +1678,7 @@ function teleportBoss(boss, gameState) {
 
   const newPos = new THREE.Vector3(
     boss.mesh.position.x + Math.cos(angle) * distance,
-    boss.mesh.position.y,
+    boss.groundY, // Lock to ground
     boss.mesh.position.z + Math.sin(angle) * distance
   );
 
@@ -869,8 +1705,39 @@ function teleportBoss(boss, gameState) {
 export function destroyBoss(boss, scene) {
   if (boss.mesh) {
     scene.remove(boss.mesh);
+
+    // Dispose geometry
     boss.mesh.geometry.dispose();
-    boss.mesh.material.dispose();
+
+    // Dispose material(s) - handle both single and array
+    if (Array.isArray(boss.mesh.material)) {
+      boss.mesh.material.forEach(mat => mat.dispose());
+    } else {
+      boss.mesh.material.dispose();
+    }
+
+    // Clean up crown child meshes for Cube King
+    boss.mesh.children.forEach(child => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach(mat => mat.dispose());
+        } else {
+          child.material.dispose();
+        }
+      }
+      // Recursively clean up crown spikes
+      child.children.forEach(grandchild => {
+        if (grandchild.geometry) grandchild.geometry.dispose();
+        if (grandchild.material) {
+          if (Array.isArray(grandchild.material)) {
+            grandchild.material.forEach(mat => mat.dispose());
+          } else {
+            grandchild.material.dispose();
+          }
+        }
+      });
+    });
   }
 
   // Clean up all active effects
@@ -884,7 +1751,21 @@ export function destroyBoss(boss, scene) {
     if (clone.mesh) {
       scene.remove(clone.mesh);
       clone.mesh.geometry.dispose();
-      clone.mesh.material.dispose();
+
+      // Handle array materials for clones too
+      if (Array.isArray(clone.mesh.material)) {
+        clone.mesh.material.forEach(mat => mat.dispose());
+      } else {
+        clone.mesh.material.dispose();
+      }
+    }
+  });
+
+  boss.platforms.forEach(platform => {
+    if (platform.mesh) {
+      scene.remove(platform.mesh);
+      platform.mesh.geometry.dispose();
+      platform.mesh.material.dispose();
     }
   });
 

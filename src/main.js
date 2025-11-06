@@ -26,7 +26,16 @@ import {
     DEV_MODE,
     BOSS_WAVE_INTERVAL,
     BOSS_XP_REWARD,
-    MAX_ACTIVE_BOSSES
+    MAX_ACTIVE_BOSSES,
+    WAVE_INITIAL_SPAWN_COUNT,
+    TRICKLE_SPAWN_INTERVAL,
+    TRICKLE_DURING_BOSS,
+    BOSS_WAVE_ENEMY_COUNT,
+    ARENA_SIZE,
+    ARENA_HALF_SIZE,
+    ARENA_PLAYABLE_HALF_SIZE,
+    WALL_HEIGHT,
+    WALL_THICKNESS
 } from './config/constants.js';
 import enemyPrototypes from './config/enemyTypes.js';
 import gemTypes from './config/gemTypes.js';
@@ -42,7 +51,7 @@ import BossUIManager from './systems/bossUI.js';
 
 // ===== System Imports =====
 import { createPlayerStats, resetPlayerStats } from './systems/playerStats.js';
-import { updateStatsUI, updateScoreUI, updateLevelUI } from './systems/ui.js';
+import { updateStatsUI, updateScoreUI, updateLevelUI, updateWaveUI } from './systems/ui.js';
 import { createInputSystem } from './systems/input.js';
 import { createCombatSystem } from './systems/combat.js';
 import {
@@ -56,7 +65,9 @@ import {
     spawnBoss,
     spawnSpecificEnemy,
     isBossWave,
-    spawnNewBoss
+    spawnNewBoss,
+    spawnWave,
+    spawnTrickleEnemy
 } from './systems/enemySpawning.js';
 import { updateBoss, bossTakeDamage, destroyBoss } from './systems/bossSystem.js';
 import { createGem, handleEnemyDeath } from './systems/gems.js';
@@ -105,7 +116,7 @@ moonlight.position.set(0, 100, 100);
 scene.add(moonlight);
 
 // ===== Ground Plane Setup (lines ~1137-1143) =====
-const groundGeometry = new THREE.PlaneGeometry(2000, 2000);
+const groundGeometry = new THREE.PlaneGeometry(ARENA_SIZE * 2, ARENA_SIZE * 2);
 const groundMaterial = new THREE.MeshStandardMaterial({
     color: 0x38222B,
     side: THREE.DoubleSide,
@@ -118,6 +129,46 @@ const ground = new THREE.Mesh(groundGeometry, groundMaterial);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
+
+// ===== Arena Walls =====
+const wallMaterial = new THREE.MeshStandardMaterial({
+    color: 0x8B4513,
+    emissive: 0x5D2E0F,
+    emissiveIntensity: 0.3,
+    metalness: 0.1,
+    roughness: 0.8
+});
+
+// Create four walls around the arena
+// North wall (positive Z)
+const wallNorthGeometry = new THREE.BoxGeometry(ARENA_SIZE + WALL_THICKNESS * 2, WALL_HEIGHT, WALL_THICKNESS);
+const wallNorth = new THREE.Mesh(wallNorthGeometry, wallMaterial);
+wallNorth.position.set(0, WALL_HEIGHT / 2, ARENA_HALF_SIZE + WALL_THICKNESS / 2);
+wallNorth.castShadow = true;
+wallNorth.receiveShadow = true;
+scene.add(wallNorth);
+
+// South wall (negative Z)
+const wallSouth = new THREE.Mesh(wallNorthGeometry.clone(), wallMaterial);
+wallSouth.position.set(0, WALL_HEIGHT / 2, -ARENA_HALF_SIZE - WALL_THICKNESS / 2);
+wallSouth.castShadow = true;
+wallSouth.receiveShadow = true;
+scene.add(wallSouth);
+
+// East wall (positive X)
+const wallEastGeometry = new THREE.BoxGeometry(WALL_THICKNESS, WALL_HEIGHT, ARENA_SIZE);
+const wallEast = new THREE.Mesh(wallEastGeometry, wallMaterial);
+wallEast.position.set(ARENA_HALF_SIZE + WALL_THICKNESS / 2, WALL_HEIGHT / 2, 0);
+wallEast.castShadow = true;
+wallEast.receiveShadow = true;
+scene.add(wallEast);
+
+// West wall (negative X)
+const wallWest = new THREE.Mesh(wallEastGeometry.clone(), wallMaterial);
+wallWest.position.set(-ARENA_HALF_SIZE - WALL_THICKNESS / 2, WALL_HEIGHT / 2, 0);
+wallWest.castShadow = true;
+wallWest.receiveShadow = true;
+scene.add(wallWest);
 
 // Initialize AreaWarningManager with ground material
 AreaWarningManager.init(groundMaterial);
@@ -163,6 +214,9 @@ let gameSpeedMultiplier = 1.0;
 let playerScaleMultiplier = 1.0;
 let bossCount = 0;
 let waveNumber = 0; // Track current wave for boss spawning
+let autoSpawnEnabled = true; // Control enemy auto-spawning (for debug panel)
+let lastTrickleSpawnTime = 0; // Track time of last trickle spawn
+let waveJustStarted = false; // Flag to spawn initial wave enemies
 let isGameOver = false;
 let isGamePaused = false;
 let isPlayerHit = false;
@@ -237,7 +291,7 @@ const playerBuffs = {
 };
 
 // ===== Initialize Managers =====
-const spatialGrid = new SpatialGrid(2000, 2000, 100);
+const spatialGrid = new SpatialGrid(ARENA_SIZE * 2, ARENA_SIZE * 2, 100);
 const damageNumberManager = new DamageNumberManager(scene, clock);
 const trailRenderer = new TrailRenderer(scene, camera);
 const bossUIManager = new BossUIManager(scene);
@@ -497,13 +551,13 @@ function updatePlayerMovement(delta) {
 
     if (movement.length() > 0) {
         movement.normalize();
-        const speed = BASE_PLAYER_SPEED * playerBuffs.moveSpeedMult;
+        const speed = BASE_PLAYER_SPEED * playerBuffs.moveSpeedMult * delta * 60;
         playerCone.position.x += movement.x * speed;
         playerCone.position.z += movement.y * speed;
 
         // Keep player in bounds
-        playerCone.position.x = Math.max(-490, Math.min(490, playerCone.position.x));
-        playerCone.position.z = Math.max(-490, Math.min(490, playerCone.position.z));
+        playerCone.position.x = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, playerCone.position.x));
+        playerCone.position.z = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, playerCone.position.z));
 
         // Rotate player to face movement direction
         const angle = Math.atan2(movement.x, movement.y);
@@ -515,12 +569,39 @@ function updatePlayerMovement(delta) {
  * Updates enemy AI and movement
  */
 function updateEnemies(delta) {
-    // Check for wave completion and boss spawning
-    if (enemies.length === 0 && bosses.length === 0) {
-        waveNumber++;
-        console.log(`Wave ${waveNumber} starting`);
+    // ===== WAVE + TRICKLE SPAWN SYSTEM =====
 
-        // Check if this is a boss wave
+    // Wave advancement: when all enemies cleared, start new wave
+    if (autoSpawnEnabled && enemies.length === 0) {
+        waveNumber++;
+        waveJustStarted = true;
+        updateWaveUI(waveNumber);
+        console.log(`Wave ${waveNumber} starting`);
+    }
+
+    // Enemy dependencies object (used by all spawn functions)
+    const enemyDependencies = {
+        scene,
+        enemies,
+        enemyPrototypes,
+        playerCone,
+        enemyCounts,
+        getBossCount: () => bossCount,
+        setBossCount: (val) => { bossCount = val; },
+        level,
+        gameSpeedMultiplier,
+        createGravityVortex: (parent, count, radius, color, isRotated) =>
+            createGravityVortex(parent, count, radius, color, isRotated, gravityWellEffects),
+        gravityWellEffects,
+        MAX_BOSSES,
+        MIN_BOX_RATIO
+    };
+
+    // Initial wave spawn: spawn large group of enemies when wave starts
+    if (waveJustStarted && autoSpawnEnabled) {
+        waveJustStarted = false;
+
+        // Boss wave: spawn boss + some enemies
         if (isBossWave(waveNumber)) {
             console.log(`Boss wave! Spawning boss...`);
             spawnNewBoss({
@@ -531,28 +612,28 @@ function updateEnemies(delta) {
                 bossUIManager,
                 playerCone
             });
+
+            // Spawn initial enemies alongside boss
+            spawnWave(BOSS_WAVE_ENEMY_COUNT, enemyDependencies);
+        }
+        // Regular wave: spawn full initial wave
+        else {
+            spawnWave(WAVE_INITIAL_SPAWN_COUNT, enemyDependencies);
         }
     }
 
-    // Check if we need to spawn more enemies (only if no boss active)
-    if (enemies.length < maxEnemies && bosses.length === 0) {
-        const enemyDependencies = {
-            scene,
-            enemies,
-            enemyPrototypes,
-            playerCone,
-            enemyCounts,
-            getBossCount: () => bossCount,
-            setBossCount: (val) => { bossCount = val; },
-            level,
-            gameSpeedMultiplier,
-            createGravityVortex: (parent, count, radius, color, isRotated) =>
-                createGravityVortex(parent, count, radius, color, isRotated, gravityWellEffects),
-            gravityWellEffects,
-            MAX_BOSSES,
-            MIN_BOX_RATIO
-        };
-        spawnEnemy(enemyDependencies);
+    // Trickle spawn: continuously spawn weak box enemies
+    // During boss fights: only trickle spawning (no large waves)
+    // During regular waves: trickle adds to initial wave
+    const currentTime = clock.getElapsedTime();
+    const shouldTrickleSpawn = autoSpawnEnabled &&
+        enemies.length < maxEnemies &&
+        (currentTime - lastTrickleSpawnTime) >= TRICKLE_SPAWN_INTERVAL &&
+        (bosses.length === 0 || TRICKLE_DURING_BOSS); // Trickle during boss if enabled
+
+    if (shouldTrickleSpawn) {
+        spawnTrickleEnemy(enemyDependencies);
+        lastTrickleSpawnTime = currentTime;
     }
 
     // Update each enemy
@@ -720,8 +801,13 @@ function updateEnemies(delta) {
                     } else {
                         // Shooter enemies shoot single projectile
                         const projectile = objectPools.enemyProjectiles.get();
-                        projectile.mesh.position.copy(enemy.mesh.position);
-                        projectile.direction.subVectors(playerCone.position, enemy.mesh.position).normalize();
+                        projectile.mesh.position.copy(enemy.mesh.position).setY(1);
+
+                        // Calculate horizontal direction only (consistent with elite enemies)
+                        const dx = playerCone.position.x - enemy.mesh.position.x;
+                        const dz = playerCone.position.z - enemy.mesh.position.z;
+                        projectile.direction.set(dx, 0, dz).normalize();
+
                         projectile.distanceTraveled = 0;
                         enemyProjectiles.push(projectile);
                     }
@@ -740,8 +826,8 @@ function updateEnemies(delta) {
                 playerCone.position.z - enemy.mesh.position.z
             ).normalize();
 
-            // Add movement with pull forces
-            const movement = directionToPlayer.clone().multiplyScalar(enemy.speed);
+            // Add movement with baseSpeed and delta (delta is gameDelta which includes gameSpeedMultiplier)
+            const movement = directionToPlayer.clone().multiplyScalar(enemy.baseSpeed * delta * 60);
             movement.add(enemy.pullForces);
 
             // Store original Y position before movement
@@ -749,6 +835,10 @@ function updateEnemies(delta) {
             enemy.mesh.position.add(movement);
             // Restore Y position to prevent sinking/floating
             enemy.mesh.position.y = originalY;
+
+            // Keep enemy within arena bounds
+            enemy.mesh.position.x = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, enemy.mesh.position.x));
+            enemy.mesh.position.z = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, enemy.mesh.position.z));
         }
 
         // Magnetic enemy pulls player (skip if frozen)
@@ -817,7 +907,7 @@ function updateRelics(delta) {
             if (distance < 35) { // Player is close enough to start converting
                 if (group.state !== 'lowering') {
                     group.state = 'lowering';
-                    group.loweringSpeed = 0.2; // Start with a base speed
+                    group.loweringSpeed = 0.1; // Start with a base speed
                 }
             }
         } else if (group.state === 'lowering' || group.state === 'converting') {
@@ -829,12 +919,156 @@ function updateRelics(delta) {
     }
 
     // Update relic states
-    const LOWERING_ACCELERATION = 0.5; // Progress per second^2
+    const LOWERING_ACCELERATION = 0.02; // Progress per second^2
     const CONVERSION_DURATION = 2.0;   // Seconds
     const RETURNING_SPEED = 0.3;       // Progress per second (2 seconds to return)
 
     for (let i = relics.length - 1; i >= 0; i--) {
         const group = relics[i];
+
+        // Update summoning circle animations
+        const playerDistance = playerCone.position.distanceTo(group.ring.position);
+        const isPlayerInside = playerDistance < 35;
+
+        // Manage circle element visibility based on player presence
+        if (isPlayerInside && (group.state === 'lowering' || group.state === 'converting')) {
+            // Player is inside - show all elements with pulsing
+            const pulseSpeed = 5.0;
+            const pulse = Math.sin(now * pulseSpeed) * 0.3 + 0.7;
+
+            // Show and fade in outer ring (keep bright)
+            if (group.ringOuterMesh && group.ringOuterMesh.material) {
+                const targetOpacity = 0.8 * pulse;
+                group.ringOuterMesh.material.opacity = targetOpacity;
+            }
+
+            // Show inner ring
+            if (group.ringInnerMesh) {
+                group.ringInnerMesh.visible = true;
+                if (group.ringInnerMesh.material) {
+                    const targetOpacity = 0.5 * pulse;
+                    group.ringInnerMesh.material.opacity = targetOpacity;
+                }
+            }
+
+            // Show rune circles
+            if (group.runeCircles) {
+                group.runeCircles.forEach(rune => {
+                    rune.visible = true;
+                    if (rune.material) {
+                        const targetOpacity = 0.6 * pulse;
+                        rune.material.opacity = targetOpacity;
+                    }
+                });
+            }
+
+            // Show particles
+            if (group.particles) {
+                group.particles.visible = true;
+            }
+
+            // Spin ring (rotate around Y axis to keep it flat on ground)
+            group.ring.rotation.y += delta * 0.375; // Quarter speed
+
+            // Rotate individual rune circles in opposite direction for mystical effect
+            if (group.runeCircles) {
+                group.runeCircles.forEach(rune => {
+                    rune.rotation.z += delta * 0.75; // Quarter speed counter-rotation
+                });
+            }
+        } else {
+            // Player is not inside - hide all except outer ring (static)
+            if (group.ringOuterMesh && group.ringOuterMesh.material) {
+                // Return outer ring to full opacity (no pulse)
+                group.ringOuterMesh.material.opacity = 1.0;
+            }
+
+            // Hide inner ring
+            if (group.ringInnerMesh) {
+                group.ringInnerMesh.visible = false;
+            }
+
+            // Hide rune circles
+            if (group.runeCircles) {
+                group.runeCircles.forEach(rune => {
+                    rune.visible = false;
+                });
+            }
+
+            // Hide particles
+            if (group.particles) {
+                group.particles.visible = false;
+            }
+
+            // Stop rotation when player leaves
+            // Ring stays at current rotation
+        }
+
+        // Update particle system
+        if (group.particles && group.particleVelocities) {
+            const positions = group.particles.geometry.attributes.position.array;
+
+            // Activate particles when converting
+            if (group.state === 'converting' || group.state === 'lowering') {
+                group.particles.material.opacity = Math.min(0.8, group.particles.material.opacity + delta * 2);
+
+                // Animate particles spiraling upward
+                for (let p = 0; p < group.particleVelocities.length; p++) {
+                    const vel = group.particleVelocities[p];
+
+                    // Spiral motion
+                    vel.angle += vel.orbitSpeed * delta;
+                    vel.radius = Math.max(5, vel.radius - delta * 3); // Spiral inward
+
+                    positions[p * 3] = Math.cos(vel.angle) * vel.radius;
+                    positions[p * 3 + 1] += vel.verticalSpeed * delta * 30;
+                    positions[p * 3 + 2] = Math.sin(vel.angle) * vel.radius;
+
+                    // Reset particle if it goes too high
+                    if (positions[p * 3 + 1] > 40) {
+                        positions[p * 3 + 1] = 0;
+                        vel.radius = 5 + Math.random() * 20;
+                    }
+
+                    // Reset if too close to center
+                    if (vel.radius < 5) {
+                        vel.radius = 25;
+                    }
+                }
+
+                group.particles.geometry.attributes.position.needsUpdate = true;
+            } else {
+                // Fade out particles when not converting
+                group.particles.material.opacity = Math.max(0, group.particles.material.opacity - delta);
+            }
+        }
+
+        // Fade out entire ring after conversion completes
+        if (group.state === 'active') {
+            // Fade out outer ring
+            if (group.ringOuterMesh && group.ringOuterMesh.material) {
+                group.ringOuterMesh.material.opacity = Math.max(0, group.ringOuterMesh.material.opacity - delta * 2);
+                // Hide completely when fully faded
+                if (group.ringOuterMesh.material.opacity <= 0) {
+                    group.ringOuterMesh.visible = false;
+                }
+            }
+
+            // Hide inner ring and runes immediately when active
+            if (group.ringInnerMesh) {
+                group.ringInnerMesh.visible = false;
+            }
+            if (group.runeCircles) {
+                group.runeCircles.forEach(rune => {
+                    rune.visible = false;
+                });
+            }
+
+            // Hide particles
+            if (group.particles) {
+                group.particles.visible = false;
+            }
+        }
 
         if (group.state === 'lowering') {
             group.loweringSpeed += LOWERING_ACCELERATION * delta;
@@ -855,6 +1089,12 @@ function updateRelics(delta) {
             group.relic.material.color.set(newColor);
             group.relic.material.emissive.set(newColor);
 
+            // Pulse light intensity during conversion
+            const lightPulse = Math.sin(now * 8) * 0.5 + 1.5;
+            if (group.light) {
+                group.light.intensity = 2 + group.conversionProgress * 3 * lightPulse;
+            }
+
             if (group.conversionProgress >= 1) {
                 group.state = 'active';
                 const strategy = relicCombatStrategies[group.type];
@@ -862,11 +1102,12 @@ function updateRelics(delta) {
                     strategy.onActivate(group);
                 }
 
+                // Enhanced completion effect - expanding energy wave
                 const flashGeometry = new THREE.SphereGeometry(group.radius * 1.5, 16, 16);
                 const flashMaterial = new THREE.MeshBasicMaterial({
-                    color: 0x00ff00,
+                    color: playerConeOriginalColor,
                     transparent: true,
-                    opacity: 0.6
+                    opacity: 0.8
                 });
                 const flash = new THREE.Mesh(flashGeometry, flashMaterial);
                 flash.position.copy(group.relic.position);
@@ -874,9 +1115,37 @@ function updateRelics(delta) {
                 temporaryEffects.push({
                     mesh: flash,
                     startTime: clock.getElapsedTime(),
-                    duration: 0.05, // 500ms
-                    type: 'flash'
+                    duration: 0.6,
+                    type: 'summoningComplete',
+                    initialScale: 1
                 });
+
+                // Ground wave effect
+                const waveGeometry = new THREE.RingGeometry(25, 30, 32);
+                const waveMaterial = new THREE.MeshBasicMaterial({
+                    color: playerConeOriginalColor,
+                    transparent: true,
+                    opacity: 0.8,
+                    side: THREE.DoubleSide
+                });
+                const wave = new THREE.Mesh(waveGeometry, waveMaterial);
+                wave.position.set(group.ring.position.x, 0.2, group.ring.position.z);
+                wave.rotation.x = -Math.PI / 2;
+                scene.add(wave);
+                temporaryEffects.push({
+                    mesh: wave,
+                    startTime: clock.getElapsedTime(),
+                    duration: 0.8,
+                    type: 'groundWave',
+                    initialScale: 1
+                });
+
+                // Burst light effect
+                if (group.light) {
+                    group.light.intensity = 10;
+                }
+
+                AudioManager.play('explosion', 0.7);
             }
         } else if (group.state === 'returning') {
             group.animationProgress -= RETURNING_SPEED * delta;
@@ -892,8 +1161,48 @@ function updateRelics(delta) {
             // Use the same consistent position formula
             group.relic.position.y = group.initialY - (group.initialY - 24) * group.animationProgress;
 
+            // Hide inner ring, runes, and particles when returning
+            if (group.ringInnerMesh) {
+                group.ringInnerMesh.visible = false;
+            }
+            if (group.runeCircles) {
+                group.runeCircles.forEach(rune => {
+                    rune.visible = false;
+                });
+            }
+            if (group.particles) {
+                group.particles.visible = false;
+            }
+
             if (group.animationProgress <= 0) {
                 group.state = 'idle';
+                // Ensure outer ring is visible and at full opacity when idle
+                if (group.ringOuterMesh) {
+                    group.ringOuterMesh.visible = true;
+                    if (group.ringOuterMesh.material) {
+                        group.ringOuterMesh.material.opacity = 1.0;
+                    }
+                }
+            }
+        } else if (group.state === 'idle') {
+            // Ensure outer ring stays visible and at full opacity in idle state
+            if (group.ringOuterMesh) {
+                group.ringOuterMesh.visible = true;
+                if (group.ringOuterMesh.material) {
+                    group.ringOuterMesh.material.opacity = 1.0;
+                }
+            }
+            // Ensure others stay hidden
+            if (group.ringInnerMesh) {
+                group.ringInnerMesh.visible = false;
+            }
+            if (group.runeCircles) {
+                group.runeCircles.forEach(rune => {
+                    rune.visible = false;
+                });
+            }
+            if (group.particles) {
+                group.particles.visible = false;
             }
         } else if (group.state === 'active') {
             // Universal active logic (health color)
@@ -903,6 +1212,11 @@ function updateRelics(delta) {
             group.relic.material.color.set(color);
             group.relic.material.emissive.set(color);
 
+            // Normalize light intensity after conversion burst
+            if (group.light && group.light.intensity > 2) {
+                group.light.intensity = Math.max(2, group.light.intensity - delta * 15);
+            }
+
             // Update relic combat behavior
             const strategy = relicCombatStrategies[group.type];
             if (strategy && strategy.update) {
@@ -910,7 +1224,7 @@ function updateRelics(delta) {
             }
 
             // Rotate relic
-            group.relic.rotation.y += delta * 0.5;
+            group.relic.rotation.y += delta * 0.2;
         }
     }
 
@@ -994,7 +1308,7 @@ function updateGemsAndCoins(delta) {
 
         gem.mesh.position.add(gem.velocity);
         gem.velocity.multiplyScalar(0.95); // Friction
-        gem.mesh.rotation.y += delta * 2;
+        gem.mesh.rotation.y += delta * 0.8;
 
         // Collection
         if (distance < playerStats.playerRadius + 2) {
@@ -1038,11 +1352,24 @@ function updateGemsAndCoins(delta) {
 
         // Attraction to player
         const distance = playerCone.position.distanceTo(coin.mesh.position);
-        if (distance < playerStats.coinPickupRadius) {
+
+        // Lock-on system: once in range, coin locks onto player
+        if (!coin.lockedOn && distance < playerStats.coinPickupRadius) {
+            coin.lockedOn = true;
+
+            // Initial push-away effect: coin moves slightly away before accelerating towards player
+            const pushDirection = new THREE.Vector3()
+                .subVectors(coin.mesh.position, playerCone.position)
+                .normalize();
+            coin.velocity.add(pushDirection.multiplyScalar(7)); // Small push away
+        }
+
+        // Attract to player if locked on (regardless of distance)
+        if (coin.lockedOn) {
             const direction = new THREE.Vector3()
                 .subVectors(playerCone.position, coin.mesh.position)
                 .normalize();
-            coin.velocity.add(direction.multiplyScalar(0.5));
+            coin.velocity.add(direction.multiplyScalar(0.6)); // Accelerate towards player
         }
 
         coin.mesh.position.add(coin.velocity);
@@ -1269,7 +1596,17 @@ function updateBosses(delta) {
         objectPools,
         playerStats,
         level,
-        waveNumber
+        waveNumber,
+        // For minion spawning
+        spawnSpecificEnemy,
+        enemyPrototypes,
+        enemyCounts,
+        getBossCount: () => bossCount,
+        setBossCount: (val) => { bossCount = val; },
+        gameSpeedMultiplier,
+        createGravityVortex: (parent, count, radius, color, isRotated) =>
+            createGravityVortex(parent, count, radius, color, isRotated, gravityWellEffects),
+        gravityWellEffects
     };
 
     // Update each boss
@@ -1394,7 +1731,7 @@ function updateBosses(delta) {
     }
 
     // Update boss UI
-    bossUIManager.update(camera, delta);
+    bossUIManager.update(camera, delta); // Note: delta is actually gameDelta here (passed as parameter)
 }
 
 // ===== Main Animation Loop (lines ~2405-3395) =====
@@ -1407,19 +1744,20 @@ function animate() {
     }
 
     const delta = Math.min(clock.getDelta(), 0.1);
+    const gameDelta = delta * gameSpeedMultiplier; // Scale time by game speed
 
     if (!isGamePaused) {
         // Clear spatial grid
         spatialGrid.clear();
 
         // Update enemies first (they populate the spatial grid)
-        updateEnemies(delta);
+        updateEnemies(gameDelta);
 
         // Update bosses
-        updateBosses(delta);
+        updateBosses(gameDelta);
 
         // Update player
-        updatePlayerMovement(delta);
+        updatePlayerMovement(gameDelta);
 
         // Update player shooting (now enemies are in spatial grid)
         const shootingState = {
@@ -1462,14 +1800,14 @@ function animate() {
             isGamePaused
         };
         playerAbilitySystem.updateAbilities(abilityState);
-        playerAbilitySystem.updateAcidGrenades(abilityState, delta);
-        playerAbilitySystem.updateAcidPools(abilityState, delta);
+        playerAbilitySystem.updateAcidGrenades(abilityState, gameDelta);
+        playerAbilitySystem.updateAcidPools(abilityState, gameDelta);
         playerAbilitySystem.updateLightningStrikes(abilityState);
-        playerAbilitySystem.updateSpiritWolves(abilityState, delta);
-        playerAbilitySystem.updateShieldBurst(abilityState, delta);
+        playerAbilitySystem.updateSpiritWolves(abilityState, gameDelta);
+        playerAbilitySystem.updateShieldBurst(abilityState, gameDelta);
         playerAbilitySystem.updateMeteorStrikes(abilityState);
-        playerAbilitySystem.updateVoidRifts(abilityState, delta);
-        playerAbilitySystem.updateTimeWarps(abilityState, delta);
+        playerAbilitySystem.updateVoidRifts(abilityState, gameDelta);
+        playerAbilitySystem.updateTimeWarps(abilityState, gameDelta);
 
         // Update enemy projectiles
         const projectileState = {
@@ -1515,20 +1853,32 @@ function animate() {
         combatSystem.updateBeams(beams);
 
         // Update relics
-        updateRelics(delta);
+        updateRelics(gameDelta);
 
         // Update gems and coins
-        updateGemsAndCoins(delta);
+        updateGemsAndCoins(gameDelta);
 
         // Update skeletons
-        updateSkeletons(delta);
+        updateSkeletons(gameDelta);
 
         // Update damaging auras
-        for (const aura of damagingAuras) {
+        for (let i = damagingAuras.length - 1; i >= 0; i--) {
+            const aura = damagingAuras[i];
             const now = clock.getElapsedTime();
-            if (now - aura.lastDamageTick >= aura.damageInterval) {
-                aura.lastDamageTick = now;
 
+            // Check if aura has expired
+            if (now >= aura.startTime + aura.duration) {
+                scene.remove(aura.mesh);
+                aura.mesh.geometry.dispose();
+                aura.mesh.material.dispose();
+                damagingAuras.splice(i, 1);
+                continue;
+            }
+
+            // Update aura animation
+            aura.mesh.rotation.y += gameDelta * 2;
+
+            if (now >= aura.nextDamageTick) {
                 const nearbyEnemies = spatialGrid.getNearby({
                     mesh: { position: aura.position },
                     radius: aura.radius
@@ -1539,33 +1889,31 @@ function animate() {
 
                     const dist = aura.position.distanceTo(enemy.mesh.position);
                     if (dist < aura.radius) {
-                        enemy.health -= aura.damage;
-                        damageNumberManager.create(enemy.mesh, aura.damage, { isCritical: false });
-
-                        // Pull effect
-                        const pullDir = new THREE.Vector3()
-                            .subVectors(aura.position, enemy.mesh.position)
-                            .normalize()
-                            .multiplyScalar(aura.pullStrength);
-                        enemy.pullForces.add(pullDir);
+                        const damage = aura.damagePerSecond;
+                        enemy.health -= damage;
+                        damageNumberManager.create(enemy.mesh, damage, { isCritical: false });
+                        if (enemy.health > 0) {
+                            AudioManager.play('hit', 0.3);
+                        }
                     }
                 }
+
+                aura.nextDamageTick = now + 1.0; // Tick every 1 second
             }
         }
 
         // Update health regeneration
-        updateHealthRegen(delta);
+        updateHealthRegen(gameDelta);
 
         // Update player hit animation
-        updatePlayerHitAnimation(delta);
+        updatePlayerHitAnimation(gameDelta);
 
         // Update effects
-        updateTemporaryEffects(temporaryEffects, clock, scene, delta);
-        updateGravityVortexEffects(gravityWellEffects, delta);
+        updateTemporaryEffects(temporaryEffects, clock, scene, gameDelta);
+        updateGravityVortexEffects(gravityWellEffects, gameDelta);
 
         // Update managers
-        AreaWarningManager.update(delta);
-        damageNumberManager.update();
+        AreaWarningManager.update(gameDelta);
         trailRenderer.update();
 
         // Update camera
@@ -1574,6 +1922,9 @@ function animate() {
         // Check game over
         checkGameOver();
     }
+
+    // Update damage numbers even when paused (so they fade out during level-up screens)
+    damageNumberManager.update();
 
     // Update boss tester (if in dev mode)
     if (debugPanel) {
@@ -1594,6 +1945,8 @@ function resetGame() {
     playerHealth = 100;
     maxEnemies = INITIAL_ENEMY_COUNT;
     waveNumber = 0;
+    lastTrickleSpawnTime = 0;
+    waveJustStarted = false;
     gameSpeedMultiplier = 1.0;
     playerScaleMultiplier = 1.0;
     bossCount = 0;
@@ -1629,6 +1982,7 @@ function resetGame() {
     // Reset UI
     updateScoreUI(score);
     updateLevelUI(level);
+    updateWaveUI(waveNumber);
     updateExperienceBar(experience, experienceToNextLevel);
     healthBarElement.style.width = '100%';
     healthBarElement.parentElement.classList.remove('health-bar-shaking');
@@ -1810,8 +2164,8 @@ function resetGame() {
     }
     timeWarps.length = 0;
 
-    // Reset abilities (optional - comment out to keep abilities between games)
-    // playerAbilitySystem.devClearAbilities();
+    // Reset abilities on game restart
+    playerAbilitySystem.devClearAbilities();
 
     // Reset enemy counts
     for (const key in enemyCounts) {
@@ -1833,7 +2187,10 @@ function resetGame() {
     // Clear damage numbers manually
     if (damageNumberManager.activeNumbers) {
         damageNumberManager.activeNumbers.forEach(num => {
-            if (num.sprite) scene.remove(num.sprite);
+            if (num.pooledSprite && num.pooledSprite.sprite) {
+                scene.remove(num.pooledSprite.sprite);
+                damageNumberManager.pool.push(num.pooledSprite);
+            }
         });
         damageNumberManager.activeNumbers.length = 0;
     }
@@ -1915,6 +2272,7 @@ console.log('Arena Roguelike - Initializing...');
 updateStatsUI(playerStats);
 updateScoreUI(score);
 updateLevelUI(level);
+// Wave UI will update automatically when first wave starts (waveNumber increments from 0 to 1)
 updateExperienceBar(experience, experienceToNextLevel);
 
 // Initialize AudioManager
@@ -1955,13 +2313,17 @@ if (DEV_MODE) {
         set gameSpeedMultiplier(val) { gameSpeedMultiplier = val; },
         get bossCount() { return bossCount; },
         set bossCount(val) { bossCount = val; },
-        autoSpawnEnabled: true, // Track auto-spawn state
+        get autoSpawnEnabled() { return autoSpawnEnabled; },
+        set autoSpawnEnabled(val) { autoSpawnEnabled = val; },
         maxRelics: MAX_RELICS,
+        MAX_RELICS: MAX_RELICS,
+        RELIC_SPAWN_Y: RELIC_SPAWN_Y,
 
         // Entity arrays
         enemies,
         bosses,
         relics,
+        relicSpawnQueue,
         gems,
         coins,
         blasterShots,
@@ -1999,9 +2361,9 @@ if (DEV_MODE) {
             playerStats,
             showLevelUpPopup: () => showLevelUpPopup({ playerStats })
         }),
-        updateStatsUI: () => updateStatsUI({ playerStats }),
-        updateScoreUI: () => updateScoreUI({ score }),
-        updateLevelUI: () => updateLevelUI({ level }),
+        updateStatsUI: () => updateStatsUI(playerStats),
+        updateScoreUI: () => updateScoreUI(score),
+        updateLevelUI: () => updateLevelUI(level),
         updateExperienceBar: () => updateExperienceBar({ experience, experienceToNextLevel })
     };
 

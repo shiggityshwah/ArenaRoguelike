@@ -244,7 +244,7 @@ export class DebugPanel {
             { name: 'regenRate', min: 0, max: 100, step: 0.5 },
             { name: 'dodgeChance', min: 0, max: 1, step: 0.01 },
             { name: 'pierceCount', min: 1, max: 20, step: 1 },
-            { name: 'areaDamageRadius', min: 0, max: 200, step: 5 },
+            { name: 'AOERadius', min: 0, max: 200, step: 5 },
             { name: 'attackDistance', min: 50, max: 500, step: 10 },
             { name: 'projectileSpeed', min: 1, max: 20, step: 0.5 },
             { name: 'pickupRadius', min: 10, max: 300, step: 5 },
@@ -598,7 +598,7 @@ export class DebugPanel {
                     <span>Level:</span>
                     <span id="game-level-value">${this.gameState.level}</span>
                 </div>
-                <input type="range" class="debug-slider" id="game-level" min="1" max="99" step="1" value="${this.gameState.level}">
+                <input type="range" class="debug-slider" id="game-level" min="1" max="100" step="1" value="${this.gameState.level}">
             </div>
             <div style="margin-bottom: 10px;">
                 <div class="debug-label">
@@ -682,8 +682,8 @@ export class DebugPanel {
 
         document.getElementById('game-max-level').addEventListener('click', () => {
             this.controls.setMaxLevel();
-            document.getElementById('game-level').value = 99;
-            document.getElementById('game-level-value').textContent = '99';
+            document.getElementById('game-level').value = 100;
+            document.getElementById('game-level-value').textContent = '100';
         });
 
         document.getElementById('game-clear-wave').addEventListener('click', () => {

@@ -17,6 +17,7 @@
  */
 
 import * as THREE from 'three';
+import { ARENA_PLAYABLE_HALF_SIZE } from '../config/constants.js';
 
 /**
  * Spawns a relic of the specified type
@@ -65,7 +66,10 @@ export function spawnRelic(gemType, nearPlayer = true, dependencies) {
     do {
         tooClose = false;
         // Spawn near player, but not too close
-        const spawnRadius = 200 + Math.random() * 200;
+        // Initial relics spawn closer (80-180), regular relics spawn further (200-400)
+        const spawnRadius = nearPlayer
+            ? 80 + Math.random() * 100
+            : 200 + Math.random() * 200;
         const spawnAngle = Math.random() * Math.PI * 2;
         position = new THREE.Vector3(
             playerCone.position.x + Math.cos(spawnAngle) * spawnRadius,
@@ -74,8 +78,8 @@ export function spawnRelic(gemType, nearPlayer = true, dependencies) {
         );
 
         // Clamp to world bounds
-        position.x = Math.max(-980, Math.min(980, position.x));
-        position.z = Math.max(-980, Math.min(980, position.z));
+        position.x = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, position.x));
+        position.z = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, position.z));
 
 
         for (const group of relics) {
@@ -89,7 +93,11 @@ export function spawnRelic(gemType, nearPlayer = true, dependencies) {
         attempts++;
         if (attempts > 20) {
             // Fallback to random placement after 20 attempts to avoid lag
-            position = new THREE.Vector3((Math.random() - 0.5) * 980, RELIC_SPAWN_Y, (Math.random() - 0.5) * 980);
+            position = new THREE.Vector3(
+                (Math.random() - 0.5) * (ARENA_PLAYABLE_HALF_SIZE * 2),
+                RELIC_SPAWN_Y,
+                (Math.random() - 0.5) * (ARENA_PLAYABLE_HALF_SIZE * 2)
+            );
             break;
         }
     } while (tooClose);
@@ -117,13 +125,99 @@ export function spawnRelic(gemType, nearPlayer = true, dependencies) {
     relic.castShadow = false;
     scene.add(relic);
 
-    const ring = new THREE.Mesh(
-        new THREE.RingGeometry(25, 27, 32),
-        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })
+    // Create multi-layered summoning circle
+    const ringGroup = new THREE.Group();
+
+    // Outer ring - main circle (always visible)
+    const outerRing = new THREE.Mesh(
+        new THREE.RingGeometry(25, 27, 64),
+        new THREE.MeshBasicMaterial({
+            color: 0xffffff, // Bright white
+            transparent: true,
+            opacity: 1.0, // Full opacity when idle
+            side: THREE.DoubleSide
+        })
     );
-    ring.position.set(relic.position.x, 0.1, relic.position.z);
-    ring.rotation.x = -Math.PI / 2;
-    scene.add(ring);
+    outerRing.rotation.x = -Math.PI / 2;
+    ringGroup.add(outerRing);
+
+    // Inner ring - pulsing glow (hidden initially)
+    const innerRing = new THREE.Mesh(
+        new THREE.RingGeometry(20, 22, 64),
+        new THREE.MeshBasicMaterial({
+            color: 0xffffff, // Bright white
+            transparent: true,
+            opacity: 0.5,
+            side: THREE.DoubleSide
+        })
+    );
+    innerRing.rotation.x = -Math.PI / 2;
+    innerRing.position.y = 0.05;
+    innerRing.visible = false; // Actually hide it
+    ringGroup.add(innerRing);
+
+    // Runic patterns (smaller circles, hidden initially)
+    const runeCircles = [];
+    for (let i = 0; i < 8; i++) {
+        const angle = (Math.PI * 2 * i) / 8;
+        const runeCircle = new THREE.Mesh(
+            new THREE.CircleGeometry(2, 16),
+            new THREE.MeshBasicMaterial({
+                color: 0xffffff, // Bright white
+                transparent: true,
+                opacity: 0.6,
+                side: THREE.DoubleSide
+            })
+        );
+        runeCircle.rotation.x = -Math.PI / 2;
+        runeCircle.position.set(
+            Math.cos(angle) * 23.5,
+            0.1,
+            Math.sin(angle) * 23.5
+        );
+        runeCircle.visible = false; // Actually hide it
+        ringGroup.add(runeCircle);
+        runeCircles.push(runeCircle);
+    }
+
+    ringGroup.position.set(relic.position.x, 0.1, relic.position.z);
+    scene.add(ringGroup);
+
+    // Create particle system for mystical effect
+    const particleCount = 50;
+    const particleGeometry = new THREE.BufferGeometry();
+    const particlePositions = new Float32Array(particleCount * 3);
+    const particleVelocities = [];
+
+    for (let i = 0; i < particleCount; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 5 + Math.random() * 20;
+        particlePositions[i * 3] = Math.cos(angle) * radius;
+        particlePositions[i * 3 + 1] = Math.random() * 5;
+        particlePositions[i * 3 + 2] = Math.sin(angle) * radius;
+
+        particleVelocities.push({
+            angle: angle,
+            radius: radius,
+            verticalSpeed: 0.5 + Math.random() * 1.0,
+            orbitSpeed: 0.5 + Math.random() * 0.5
+        });
+    }
+
+    particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+
+    const particleMaterial = new THREE.PointsMaterial({
+        color: info.color, // Match relic color
+        size: 2,
+        transparent: true,
+        opacity: 0, // Hidden initially
+        blending: THREE.AdditiveBlending
+    });
+
+    const particleSystem = new THREE.Points(particleGeometry, particleMaterial);
+    particleSystem.position.set(relic.position.x, 0, relic.position.z);
+    particleSystem.visible = false; // Actually hide it initially
+    scene.add(particleSystem);
 
     const light = new THREE.PointLight(info.color, 2, 200);
     light.position.copy(relic.position);
@@ -134,7 +228,12 @@ export function spawnRelic(gemType, nearPlayer = true, dependencies) {
     const initialY = RELIC_SPAWN_Y;
     relics.push({
         relic, // was octahedron
-        ring,
+        ring: ringGroup, // Now a group with multiple elements
+        ringOuterMesh: outerRing,
+        ringInnerMesh: innerRing,
+        runeCircles: runeCircles, // Array of rune meshes
+        particles: particleSystem,
+        particleVelocities: particleVelocities,
         light,
         type: gemType,
         health: info.health,
@@ -220,10 +319,22 @@ export function destroyRelic(group, index, dependencies) {
         group.auraVisual = null;
     }
     group.relic.material.dispose();
-    group.ring.geometry.dispose();
-    group.ring.material.dispose();
-    scene.remove(group.relic);
+
+    // Clean up ring group and all its children
+    group.ring.traverse((child) => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+    });
     scene.remove(group.ring);
+
+    // Clean up particles
+    if (group.particles) {
+        group.particles.geometry.dispose();
+        group.particles.material.dispose();
+        scene.remove(group.particles);
+    }
+
+    scene.remove(group.relic);
     scene.remove(group.light);
     relics.splice(index, 1);
 }

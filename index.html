@@ -21,6 +21,21 @@
     >
       lvl <span id="level">1</span>
     </div>
+    <div
+      id="wave-container"
+      style="
+        position: absolute;
+        top: 20px;
+        left: 25%;
+        transform: translateX(-50%);
+        color: #00bfff;
+        font-family: 'Press Start 2P', cursive;
+        font-size: 48px;
+        text-shadow: 0 0 10px #00bfff;
+      "
+    >
+      wave <span id="wave">1</span>
+    </div>
     <div id="gem-counters">
       <span id="gem-damage" class="gem-counter" style="color: #FF1493;">0</span>
       <span id="gem-speed" class="gem-counter" style="color: #FF4500;">0</span>
@@ -102,14 +117,10 @@
     <div id="level-up-overlay">
       <div id="level-up-popup">
         <h2>LEVEL UP!</h2>
-        <p>Choose an upgrade</p>
+        <p>Choose an upgrade to enhance your abilities</p>
         <div id="upgrade-options">
-          <!-- Buttons will be generated here -->
-          <div id="skip-button-container">
-            <div id="skip-button-progress"></div>
-          </div>
+          <!-- Upgrade cards and skip button will be generated here -->
         </div>
-        <div id="skip-button-text">Skip</div>
       </div>
     </div>
 

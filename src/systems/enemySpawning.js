@@ -20,7 +20,7 @@
 import * as THREE from 'three';
 import { createBoss } from './bossSystem.js';
 import { getRandomBossType } from '../config/bossTypes.js';
-import { BOSS_WAVE_INTERVAL, MAX_ACTIVE_BOSSES } from '../config/constants.js';
+import { BOSS_WAVE_INTERVAL, MAX_ACTIVE_BOSSES, ARENA_PLAYABLE_HALF_SIZE } from '../config/constants.js';
 
 // Enemy unlock levels
 const enemyUnlockLevels = {
@@ -101,8 +101,8 @@ export function spawnSpecificEnemy(type, isBoss = false, dependencies) {
 
     let x, z, attempts = 0;
     do {
-        x = (Math.random() - 0.5) * 980;
-        z = (Math.random() - 0.5) * 980;
+        x = (Math.random() - 0.5) * (ARENA_PLAYABLE_HALF_SIZE * 2);
+        z = (Math.random() - 0.5) * (ARENA_PLAYABLE_HALF_SIZE * 2);
         if (attempts++ > 100) {
             console.warn("Could not place enemy far from player after 100 attempts.");
             break;
@@ -286,8 +286,8 @@ export function spawnNewBoss(dependencies) {
     let attempts = 0;
 
     do {
-        const x = (Math.random() - 0.5) * 900;
-        const z = (Math.random() - 0.5) * 900;
+        const x = (Math.random() - 0.5) * (ARENA_PLAYABLE_HALF_SIZE * 1.8);
+        const z = (Math.random() - 0.5) * (ARENA_PLAYABLE_HALF_SIZE * 1.8);
         spawnPosition = new THREE.Vector3(x, 100, z); // Spawns high in sky
 
         attempts++;
@@ -326,4 +326,35 @@ export function spawnNewBoss(dependencies) {
     console.log(`Spawned boss: ${boss.bossType} (Wave ${waveNumber})`);
 
     return boss;
+}
+
+/**
+ * Spawn multiple enemies for a wave start
+ * @param {number} count - Number of enemies to spawn
+ * @param {Object} dependencies - Dependencies for enemy spawning (same as spawnEnemy)
+ * @returns {Array} Array of spawned enemies
+ */
+export function spawnWave(count, dependencies) {
+    const spawnedEnemies = [];
+
+    for (let i = 0; i < count; i++) {
+        const enemy = spawnEnemy(dependencies);
+        if (enemy) {
+            spawnedEnemies.push(enemy);
+        }
+    }
+
+    console.log(`Spawned wave: ${spawnedEnemies.length} enemies`);
+    return spawnedEnemies;
+}
+
+/**
+ * Spawn a single trickle enemy (always 'box' type)
+ * @param {Object} dependencies - Dependencies for enemy spawning
+ * @returns {Object|null} Spawned enemy or null if failed
+ */
+export function spawnTrickleEnemy(dependencies) {
+    // Force spawn a 'box' enemy by calling spawnSpecificEnemy directly
+    const enemy = spawnSpecificEnemy('box', false, dependencies);
+    return enemy;
 }

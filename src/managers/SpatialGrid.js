@@ -31,9 +31,24 @@ class SpatialGrid {
     }
 
     add(obj) {
-        const { gridX, gridZ } = this.getCellCoords(obj.mesh.position.x, obj.mesh.position.z);
+        // Safety check for valid object and position
+        if (!obj || !obj.mesh || !obj.mesh.position) return;
+
+        const x = obj.mesh.position.x;
+        const z = obj.mesh.position.z;
+
+        // Check for invalid coordinates (NaN or undefined)
+        if (typeof x !== 'number' || typeof z !== 'number' || isNaN(x) || isNaN(z)) {
+            console.warn('SpatialGrid: Invalid position detected', x, z);
+            return;
+        }
+
+        const { gridX, gridZ } = this.getCellCoords(x, z);
         const index = this.getCellIndexFromCoords(gridX, gridZ);
-        if (index !== -1) this.grid[index].push(obj);
+
+        if (index !== -1 && this.grid[index]) {
+            this.grid[index].push(obj);
+        }
     }
 
     getNearby(obj) { // obj is { mesh, radius }

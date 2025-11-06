@@ -36,7 +36,7 @@ export function updateStatsUI(playerStats) {
     document.getElementById('stat-regen').textContent = playerStats.regenRate.toFixed(1);
     document.getElementById('stat-dodge').textContent = (playerStats.dodgeChance * 100).toFixed(0);
     document.getElementById('stat-pierce').textContent = playerStats.pierceCount;
-    document.getElementById('stat-aoe').textContent = playerStats.areaDamageRadius;
+    document.getElementById('stat-aoe').textContent = playerStats.AOERadius;
 }
 
 /**
@@ -59,4 +59,15 @@ export function updateScoreUI(score) {
  */
 export function updateLevelUI(level) {
     document.getElementById('level').textContent = level;
+}
+
+/**
+ * Updates the wave number display
+ * @param {number} wave - Current wave number
+ *
+ * Dependencies:
+ * - HTML element with ID: wave
+ */
+export function updateWaveUI(wave) {
+    document.getElementById('wave').textContent = wave;
 }
