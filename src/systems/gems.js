@@ -25,7 +25,9 @@ const enemyGemMapping = {
     berserker: 'speed',     // Green
     magnetic: 'vacuum',     // Blue
     elite: 'crit',          // Yellow
-    phantom: 'luck'         // White
+    phantom: 'luck',        // White
+    swarm: 'tech',          // Cyan
+    mortar: 'mortar'        // Military Green
 };
 
 /**
@@ -139,63 +141,77 @@ export function handleEnemyDeath(enemy, dependencies) {
 
     const gemType = enemyGemMapping[enemy.type];
 
-    if (enemy.isBoss) {
+    // Swarm members: only drop rewards if this is the last member
+    const shouldDropRewards = !enemy.swarmId || enemy.isLastSwarmMember;
+
+    // Handle boss swarm: decrement boss count when last member dies
+    if (enemy.isBossSwarm && enemy.isLastSwarmMember) {
         const newBossCount = getBossCount() - 1;
         setBossCount(newBossCount);
-
-        // Drop a big XP coin
-        const coin = new THREE.Sprite(coinSpriteMaterial.clone());
-        coin.scale.set(6, 6, 1);
-        coin.position.copy(enemy.mesh.position);
-        coin.position.y = 2;
-        scene.add(coin);
-        coins.push({ mesh: coin, gold: 15, velocity: new THREE.Vector3() });
-
-        // Bosses drop 2 of their own gem type
-        if (gemType) {
-            for (let i = 0; i < 2; i++) {
-                createGem(gemType, enemy.mesh.position, dependencies);
-            }
-        }
-        // And one other random gem
-        const allGemTypes = Object.keys(gemTypes);
-        const otherGemTypes = allGemTypes.filter(t => t !== gemType);
-        if (otherGemTypes.length > 0) {
-            const randomGemType = otherGemTypes[Math.floor(Math.random() * otherGemTypes.length)];
-            createGem(randomGemType, enemy.mesh.position, dependencies);
-        }
-    } else {
-        // Normal enemies drop one XP coin
-        const goldAmount = Math.floor(Math.random() * 5) + 1;
-        const coin = new THREE.Sprite(coinSpriteMaterial.clone());
-        coin.scale.set(3, 3, 1);
-        coin.position.copy(enemy.mesh.position);
-        coin.position.y = 2;
-        scene.add(coin);
-        coins.push({ mesh: coin, gold: goldAmount, velocity: new THREE.Vector3() });
-
-        // And have a chance to drop a specific gem (if not a 'box' enemy)
-        if (gemType) {
-            const dropChance = playerStats.luck; // 50% base luck = 50% chance.
-            if (Math.random() < dropChance) {
-                const gemInfo = gemTypes[gemType]; // Define gemInfo for this scope
-                const gem = new THREE.Mesh(gemInfo.geometry, new THREE.MeshStandardMaterial({ color: gemInfo.color, flatShading: true, emissive: gemInfo.color, emissiveIntensity: 1.0, toneMapped: false }));
-
-                const wireframeGeometry = new THREE.WireframeGeometry(gem.geometry);
-                const wireframeColor = new THREE.Color(gemInfo.color).lerp(new THREE.Color(0xffffff), 0.5);
-                const wireframeMaterial = new THREE.LineBasicMaterial({ color: wireframeColor, transparent: true, opacity: 0.8 });
-                const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
-                gem.add(wireframe);
-
-                gem.position.copy(enemy.mesh.position);
-                gem.position.y = 2;
-                scene.add(gem);
-                gems.push({ mesh: gem, type: gemType, velocity: new THREE.Vector3() });
-            }
-        }
     }
 
-    const newScore = getScore() + 1;
-    setScore(newScore);
-    scoreElement.textContent = newScore;
+    if (shouldDropRewards) {
+        if (enemy.isBoss || (enemy.isBossSwarm && enemy.isLastSwarmMember)) {
+            // Don't double-decrement boss count
+            if (!enemy.isBossSwarm) {
+                const newBossCount = getBossCount() - 1;
+                setBossCount(newBossCount);
+            }
+
+            // Drop a big XP coin
+            const coin = new THREE.Sprite(coinSpriteMaterial.clone());
+            coin.scale.set(6, 6, 1);
+            coin.position.copy(enemy.mesh.position);
+            coin.position.y = 2;
+            scene.add(coin);
+            coins.push({ mesh: coin, gold: 15, velocity: new THREE.Vector3() });
+
+            // Bosses drop 2 of their own gem type
+            if (gemType) {
+                for (let i = 0; i < 2; i++) {
+                    createGem(gemType, enemy.mesh.position, dependencies);
+                }
+            }
+            // And one other random gem
+            const allGemTypes = Object.keys(gemTypes);
+            const otherGemTypes = allGemTypes.filter(t => t !== gemType);
+            if (otherGemTypes.length > 0) {
+                const randomGemType = otherGemTypes[Math.floor(Math.random() * otherGemTypes.length)];
+                createGem(randomGemType, enemy.mesh.position, dependencies);
+            }
+        } else {
+            // Normal enemies drop one XP coin
+            const goldAmount = Math.floor(Math.random() * 5) + 1;
+            const coin = new THREE.Sprite(coinSpriteMaterial.clone());
+            coin.scale.set(3, 3, 1);
+            coin.position.copy(enemy.mesh.position);
+            coin.position.y = 2;
+            scene.add(coin);
+            coins.push({ mesh: coin, gold: goldAmount, velocity: new THREE.Vector3() });
+
+            // And have a chance to drop a specific gem (if not a 'box' enemy)
+            if (gemType) {
+                const dropChance = playerStats.luck; // 50% base luck = 50% chance.
+                if (Math.random() < dropChance) {
+                    const gemInfo = gemTypes[gemType]; // Define gemInfo for this scope
+                    const gem = new THREE.Mesh(gemInfo.geometry, new THREE.MeshStandardMaterial({ color: gemInfo.color, flatShading: true, emissive: gemInfo.color, emissiveIntensity: 1.0, toneMapped: false }));
+
+                    const wireframeGeometry = new THREE.WireframeGeometry(gem.geometry);
+                    const wireframeColor = new THREE.Color(gemInfo.color).lerp(new THREE.Color(0xffffff), 0.5);
+                    const wireframeMaterial = new THREE.LineBasicMaterial({ color: wireframeColor, transparent: true, opacity: 0.8 });
+                    const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
+                    gem.add(wireframe);
+
+                    gem.position.copy(enemy.mesh.position);
+                    gem.position.y = 2;
+                    scene.add(gem);
+                    gems.push({ mesh: gem, type: gemType, velocity: new THREE.Vector3() });
+                }
+            }
+        }
+
+        const newScore = getScore() + 1;
+        setScore(newScore);
+        scoreElement.textContent = newScore;
+    }
 }

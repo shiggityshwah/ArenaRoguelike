@@ -139,3 +139,52 @@ export function constrainToBounds(position, bounds) {
     position.z = clamp(position.z, -bounds, bounds);
     return position;
 }
+
+/**
+ * Calculates the initial velocity for a lobbing/arc projectile with a specified apex height
+ * @param {THREE.Vector3} startPos - Starting position of the projectile
+ * @param {THREE.Vector3} targetPos - Target impact position
+ * @param {number} flightTime - Desired time for projectile to reach target (seconds)
+ * @param {number} gravity - Gravity constant (negative value, e.g., -20)
+ * @param {number} apexHeight - Optional apex height override (if provided, ignores flightTime for Y calc)
+ * @returns {Object} Object containing velocity (THREE.Vector3) and impactTime (number)
+ */
+export function calculateLobTrajectory(startPos, targetPos, flightTime, gravity, apexHeight = null) {
+    const dx = targetPos.x - startPos.x;
+    const dz = targetPos.z - startPos.z;
+    const dy = targetPos.y - startPos.y;
+
+    let initialYVelocity;
+    let actualFlightTime = flightTime;
+
+    if (apexHeight !== null) {
+        // Calculate initial Y velocity to reach the specified apex height
+        // At apex, v_y = 0, so using v² = u² + 2as:
+        // 0 = u² + 2*g*apex, solving for u: u = sqrt(-2*g*apex)
+        initialYVelocity = Math.sqrt(-2 * gravity * apexHeight);
+
+        // Calculate actual flight time based on apex height
+        // For symmetric arc from y=0 to y=0:
+        // Time to apex: t_up = v_y0 / |g|
+        // Total time: t_total = 2 * t_up
+        const timeToApex = initialYVelocity / Math.abs(gravity);
+        actualFlightTime = 2 * timeToApex;
+    } else {
+        // Calculate initial Y velocity needed to reach target height with gravity
+        // Using kinematic equation: dy = v0*t + 0.5*a*t^2
+        // Solving for v0: v0 = (dy - 0.5*g*t^2) / t
+        initialYVelocity = (dy - 0.5 * gravity * flightTime * flightTime) / flightTime;
+    }
+
+    // Calculate horizontal velocity based on actual flight time
+    const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+
+    return {
+        velocity: new THREE.Vector3(
+            dx / actualFlightTime,
+            initialYVelocity,
+            dz / actualFlightTime
+        ),
+        impactTime: actualFlightTime
+    };
+}

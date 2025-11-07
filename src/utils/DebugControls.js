@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three';
-import { spawnSpecificEnemy, spawnNewBoss } from '../systems/enemySpawning.js';
+import { spawnSpecificEnemy, spawnNewBoss, spawnSwarm, spawnBossSwarm } from '../systems/enemySpawning.js';
 import { spawnRelic, destroyRelic } from '../systems/relicSpawning.js';
 import { createGem } from '../systems/gems.js';
 import { ABILITY_DEFINITIONS } from '../systems/playerAbilities.js';
@@ -171,12 +171,55 @@ export class DebugControls {
 
     /**
      * Spawn a specific enemy type
+     * @param {string} type - Enemy type
+     * @param {string} tier - Tier: 'normal' or 'elite'
+     * @param {number} quantity - Number to spawn
+     * @param {number} level - Optional level override
      */
-    spawnEnemy(type, isBoss = false, quantity = 1, level = null) {
+    spawnEnemy(type, tier = 'normal', quantity = 1, level = null) {
         const actualLevel = level !== null ? level : this.gameState.level;
 
-        for (let i = 0; i < quantity; i++) {
-            spawnSpecificEnemy(type, isBoss, {
+        const dependencies = {
+            scene: this.gameState.scene,
+            enemies: this.gameState.enemies,
+            enemyPrototypes: this.gameState.enemyPrototypes,
+            playerCone: this.gameState.playerCone,
+            enemyCounts: this.gameState.enemyCounts,
+            getBossCount: () => this.gameState.bossCount,
+            setBossCount: (count) => { this.gameState.bossCount = count; },
+            level: actualLevel,
+            waveNumber: this.gameState.waveNumber || 1,
+            gameSpeedMultiplier: this.gameState.gameSpeedMultiplier,
+            createGravityVortex: this.gameState.createGravityVortex,
+            gravityWellEffects: this.gameState.gravityWellEffects,
+            MAX_BOSSES: this.gameState.MAX_BOSSES || 3
+        };
+
+        // Special handling for swarms
+        if (type === 'swarm') {
+            for (let i = 0; i < quantity; i++) {
+                spawnSwarm(dependencies, tier);
+            }
+            const tierName = tier === 'elite' ? ' (ELITE)' : '';
+            console.log(`Spawned ${quantity}x swarm${tierName}`);
+        } else {
+            // Regular enemies
+            for (let i = 0; i < quantity; i++) {
+                spawnSpecificEnemy(type, tier, dependencies);
+            }
+            const tierName = tier === 'elite' ? ' (ELITE)' : '';
+            console.log(`Spawned ${quantity}x ${type}${tierName}`);
+        }
+    }
+
+    /**
+     * Spawn a boss from the boss system
+     * @param {string} bossType - Boss type to spawn
+     */
+    spawnBoss(bossType) {
+        // Special handling for swarm boss
+        if (bossType === 'swarm') {
+            const dependencies = {
                 scene: this.gameState.scene,
                 enemies: this.gameState.enemies,
                 enemyPrototypes: this.gameState.enemyPrototypes,
@@ -184,14 +227,29 @@ export class DebugControls {
                 enemyCounts: this.gameState.enemyCounts,
                 getBossCount: () => this.gameState.bossCount,
                 setBossCount: (count) => { this.gameState.bossCount = count; },
-                level: actualLevel,
+                level: this.gameState.level,
+                waveNumber: this.gameState.waveNumber || 1,
                 gameSpeedMultiplier: this.gameState.gameSpeedMultiplier,
                 createGravityVortex: this.gameState.createGravityVortex,
-                gravityWellEffects: this.gameState.gravityWellEffects
-            });
+                gravityWellEffects: this.gameState.gravityWellEffects,
+                MAX_BOSSES: this.gameState.MAX_BOSSES || 3
+            };
+            spawnBossSwarm(dependencies);
+            console.log('Spawned The Hivemind boss');
+            return;
         }
 
-        console.log(`Spawned ${quantity}x ${type} ${isBoss ? '(boss)' : ''}`);
+        // Regular boss system bosses
+        spawnNewBoss({
+            scene: this.gameState.scene,
+            level: this.gameState.level,
+            waveNumber: this.gameState.waveNumber || 1,
+            bosses: this.gameState.bosses,
+            bossUIManager: this.gameState.bossUIManager,
+            playerCone: this.gameState.playerCone,
+            bossType: bossType
+        });
+        console.log(`Spawned ${bossType} boss`);
     }
 
     /**

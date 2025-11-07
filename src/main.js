@@ -35,7 +35,8 @@ import {
     ARENA_HALF_SIZE,
     ARENA_PLAYABLE_HALF_SIZE,
     WALL_HEIGHT,
-    WALL_THICKNESS
+    WALL_THICKNESS,
+    MORTAR_CONFIG
 } from './config/constants.js';
 import enemyPrototypes from './config/enemyTypes.js';
 import gemTypes from './config/gemTypes.js';
@@ -84,6 +85,7 @@ import { createPlayerAbilitySystem, ABILITY_DEFINITIONS } from './systems/player
 
 // ===== Utility Imports =====
 import { TrailRenderer } from './utils/TrailRenderer.js';
+import { calculateLobTrajectory } from './utils/helpers.js';
 import DebugPanel from './utils/DebugPanel.js';
 
 // ===== THREE.js Scene Setup (lines ~1122-1135) =====
@@ -663,11 +665,13 @@ function updateEnemies(delta) {
             enemies.splice(i, 1);
 
             // Award experience
-            experience += enemy.isBoss ? 20 : 3;
+            // Boss swarms: only last member gives boss XP
+            const isBossKill = enemy.isBoss && (!enemy.isBossSwarm || enemy.isLastSwarmMember);
+            experience += isBossKill ? 20 : 3;
             updateExperienceBar(experience, experienceToNextLevel);
 
             // Check if boss was killed - show ability selection
-            if (enemy.isBoss) {
+            if (isBossKill) {
                 showAbilitySelectionPopup();
             }
 
@@ -817,9 +821,187 @@ function updateEnemies(delta) {
             }
         }
 
+        // Mortar enemy shooting logic
+        if (!isFrozen && enemy.type === 'mortar') {
+            const now = clock.getElapsedTime();
+            const config = MORTAR_CONFIG;
+            const shootCooldown = config.shootCooldown / gameSpeedMultiplier;
+
+            // Initialize if needed
+            if (enemy.lastShotTime === undefined) {
+                enemy.lastShotTime = now;
+                enemy.pendingShots = [];
+            }
+
+            // Check for shooting
+            const distance = enemy.mesh.position.distanceTo(playerCone.position);
+            if (now - enemy.lastShotTime >= shootCooldown && distance < config.shootRange) {
+                enemy.lastShotTime = now;
+
+                // Simple prediction: target current player position
+                // (Could add velocity prediction later for more challenge)
+                const impactPos = playerCone.position.clone();
+                impactPos.y = 0; // Ground level
+
+                // Constrain to arena bounds
+                impactPos.x = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, impactPos.x));
+                impactPos.z = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, impactPos.z));
+
+                // Calculate trajectory to get actual flight time
+                const startPos = enemy.mesh.position.clone();
+                startPos.y = 10; // Projectile start height
+                const trajectory = calculateLobTrajectory(
+                    startPos,
+                    impactPos,
+                    config.projectileFlightTime,
+                    config.gravity,
+                    config.lobApex
+                );
+
+                // Create ground warning with actual flight time as duration
+                AreaWarningManager.create(
+                    impactPos,
+                    config.explosionRadius,
+                    0xFF0000, // Red warning
+                    trajectory.impactTime, // Use calculated flight time
+                    'gradient'
+                );
+
+                // Schedule projectile launch immediately (small delay for visual effect)
+                enemy.pendingShots.push({
+                    launchTime: now + 0.1, // Launch almost immediately
+                    impactPos: impactPos.clone(),
+                    preCalculatedVelocity: trajectory.velocity
+                });
+            }
+
+            // Launch pending shots
+            if (enemy.pendingShots && enemy.pendingShots.length > 0) {
+                for (let i = enemy.pendingShots.length - 1; i >= 0; i--) {
+                    const pending = enemy.pendingShots[i];
+                    if (now >= pending.launchTime) {
+                        // Launch projectile
+                        const proj = objectPools.enemyProjectiles.get();
+                        proj.mesh.position.copy(enemy.mesh.position);
+                        proj.mesh.position.y = 10; // Start above enemy
+
+                        // Use pre-calculated velocity
+                        proj.velocity = pending.preCalculatedVelocity;
+                        proj.impactPosition = pending.impactPos;
+                        proj.damage = config.projectileDamage;
+                        proj.explosionRadius = config.explosionRadius;
+                        proj.isLobbing = true;
+                        proj.distanceTraveled = 0;
+                        proj.range = 999; // No range limit for mortars
+
+                        enemyProjectiles.push(proj);
+
+                        // Remove from pending
+                        enemy.pendingShots.splice(i, 1);
+
+                        // Play launch sound
+                        AudioManager.play('enemyShoot', 0.3);
+                    }
+                }
+            }
+        }
+
+        // Swarm flocking behavior (Boids algorithm)
+        if (!isFrozen && enemy.type === 'swarm') {
+            // Get all swarm members from same group
+            const swarmMembers = enemies.filter(e => e.swarmId === enemy.swarmId && e.health > 0);
+
+            // Update isLastSwarmMember flag
+            if (swarmMembers.length === 1) {
+                enemy.isLastSwarmMember = true;
+            }
+
+            // Reset flocking forces
+            enemy.separationForce.set(0, 0, 0);
+            enemy.alignmentForce.set(0, 0, 0);
+            enemy.cohesionForce.set(0, 0, 0);
+
+            const separationRadius = 20; // Avoid crowding within this distance
+            const alignmentRadius = 40;  // Match velocity with neighbors within this distance
+            const cohesionRadius = 60;   // Move toward swarm center within this distance
+
+            let separationCount = 0;
+            let alignmentCount = 0;
+            let cohesionCount = 0;
+            const cohesionCenter = new THREE.Vector3();
+
+            // Calculate flocking forces from neighbors
+            for (const other of swarmMembers) {
+                if (other === enemy) continue;
+
+                const distance = enemy.mesh.position.distanceTo(other.mesh.position);
+
+                // Separation: steer away from nearby members
+                if (distance < separationRadius && distance > 0) {
+                    const diff = new THREE.Vector3()
+                        .subVectors(enemy.mesh.position, other.mesh.position)
+                        .normalize()
+                        .divideScalar(distance); // Stronger force when closer
+                    enemy.separationForce.add(diff);
+                    separationCount++;
+                }
+
+                // Alignment: match velocity with neighbors
+                if (distance < alignmentRadius) {
+                    enemy.alignmentForce.add(other.flockingVelocity);
+                    alignmentCount++;
+                }
+
+                // Cohesion: move toward swarm center
+                if (distance < cohesionRadius) {
+                    cohesionCenter.add(other.mesh.position);
+                    cohesionCount++;
+                }
+            }
+
+            // Average the forces
+            if (separationCount > 0) {
+                enemy.separationForce.divideScalar(separationCount).normalize().multiplyScalar(2.5);
+            }
+            if (alignmentCount > 0) {
+                enemy.alignmentForce.divideScalar(alignmentCount).normalize().multiplyScalar(0.8);
+            }
+            if (cohesionCount > 0) {
+                cohesionCenter.divideScalar(cohesionCount);
+                enemy.cohesionForce.subVectors(cohesionCenter, enemy.mesh.position).normalize().multiplyScalar(1.2);
+            }
+
+            // Player-seeking force
+            const directionToPlayer = new THREE.Vector3(
+                playerCone.position.x - enemy.mesh.position.x,
+                0,
+                playerCone.position.z - enemy.mesh.position.z
+            ).normalize().multiplyScalar(1.5);
+
+            // Combine all forces
+            const combinedForce = new THREE.Vector3()
+                .add(enemy.separationForce)
+                .add(enemy.alignmentForce)
+                .add(enemy.cohesionForce)
+                .add(directionToPlayer)
+                .add(enemy.pullForces);
+
+            // Apply combined force as velocity
+            enemy.flockingVelocity.copy(combinedForce).normalize();
+
+            // Apply movement
+            const movement = enemy.flockingVelocity.clone().multiplyScalar(enemy.baseSpeed * delta * 60);
+            const originalY = enemy.mesh.position.y;
+            enemy.mesh.position.add(movement);
+            enemy.mesh.position.y = originalY;
+
+            // Keep within arena bounds
+            enemy.mesh.position.x = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, enemy.mesh.position.x));
+            enemy.mesh.position.z = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, enemy.mesh.position.z));
+        }
         // Movement AI (horizontal only - keep Y constant to prevent sinking)
-        // Skip movement if frozen
-        if (!isFrozen) {
+        // Skip movement if frozen or if swarm (swarms use flocking above)
+        else if (!isFrozen && enemy.type !== 'swarm') {
             const directionToPlayer = new THREE.Vector3(
                 playerCone.position.x - enemy.mesh.position.x,
                 0,  // No Y movement
@@ -1606,7 +1788,11 @@ function updateBosses(delta) {
         gameSpeedMultiplier,
         createGravityVortex: (parent, count, radius, color, isRotated) =>
             createGravityVortex(parent, count, radius, color, isRotated, gravityWellEffects),
-        gravityWellEffects
+        gravityWellEffects,
+        // Mortar boss dependencies
+        AreaWarningManager,
+        calculateLobTrajectory,
+        MORTAR_CONFIG
     };
 
     // Update each boss
@@ -1703,7 +1889,10 @@ function updateBosses(delta) {
 
         // Check contact damage with player
         const distanceToBoss = boss.mesh.position.distanceTo(playerCone.position);
-        const collisionDistance = boss.mesh.geometry.parameters?.radius * boss.mesh.scale.x || 30;
+        // Handle different geometry types
+        const geomParams = boss.mesh.geometry.parameters;
+        let baseRadius = geomParams?.radius || geomParams?.radiusTop || geomParams?.radiusBottom || 30;
+        const collisionDistance = baseRadius * boss.mesh.scale.x;
 
         if (distanceToBoss < collisionDistance + 10) {
             // Apply contact damage with cooldown (1 second between hits)

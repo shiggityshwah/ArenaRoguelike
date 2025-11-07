@@ -158,12 +158,13 @@ const AreaWarningManager = {
                 uniform.radius = warning.radius;
                 uniform.color.copy(warning.color);
 
-                const fadeInDuration = 0.1;
                 let intensity = 0;
-                if (elapsed < fadeInDuration) {
-                    intensity = elapsed / fadeInDuration;
+                if (elapsed < warning.duration) {
+                    // Fade in from 0 to 1 over the full warning duration
+                    intensity = elapsed / warning.duration;
                 } else {
-                    intensity = 1.0 - ((elapsed - fadeInDuration) / (warning.duration + FADE_OUT_TIME - fadeInDuration));
+                    // Quick fade out after duration ends
+                    intensity = 1.0 - ((elapsed - warning.duration) / FADE_OUT_TIME);
                 }
                 uniform.intensity = Math.max(0, intensity);
                 uniform.type = (warning.effectType === 'gradient') ? 1.0 : 0.0;

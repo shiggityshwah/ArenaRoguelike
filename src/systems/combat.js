@@ -7,10 +7,11 @@
  * - Game State: enemies, blasterShots, enemyProjectiles, beams, playerCone, playerStats, playerHealth, etc.
  * - Managers: objectPools, spatialGrid, damageNumberManager, AudioManager
  * - Config: relicInfo
- * - Effects: createExplosion
+ * - Effects: createExplosion, createDebris
  */
 
 import * as THREE from 'three';
+import { MORTAR_CONFIG } from '../config/constants.js';
 
 export function createCombatSystem({
     scene,
@@ -21,6 +22,7 @@ export function createCombatSystem({
     AudioManager,
     relicInfo,
     createExplosion,
+    createDebris,
     destroyRelic
 }) {
     // ===== Constants =====
@@ -264,6 +266,86 @@ export function createCombatSystem({
         }
     }
 
+    // ===== Mortar Impact Handler =====
+    /**
+     * Handles mortar projectile impact - explosion and AoE damage
+     * @param {Object} projectile - The mortar projectile
+     * @param {Object} gameState - Current game state
+     */
+    function handleMortarImpact(projectile, gameState) {
+        const {
+            playerCone,
+            playerStats,
+            relics,
+            playerIsBoosted,
+            healthBarElement,
+            temporaryEffects
+        } = gameState;
+
+        let playerHealth = gameState.playerHealth;
+        let isPlayerHit = gameState.isPlayerHit;
+        let hitAnimationTime = gameState.hitAnimationTime;
+
+        const impactPos = projectile.mesh.position.clone();
+        impactPos.y = 0; // Ground level
+
+        // Visual explosion
+        createExplosion(impactPos, projectile.explosionRadius || MORTAR_CONFIG.explosionRadius, scene, temporaryEffects, clock);
+        if (createDebris) {
+            createDebris(impactPos, projectile.explosionRadius || MORTAR_CONFIG.explosionRadius, scene, temporaryEffects, clock);
+        }
+
+        // Audio
+        AudioManager.play('explosion', 0.5);
+
+        // Calculate damage to player
+        const distanceToPlayer = impactPos.distanceTo(playerCone.position);
+        const explosionRadius = projectile.explosionRadius || MORTAR_CONFIG.explosionRadius;
+
+        if (distanceToPlayer < explosionRadius) {
+            // Check dodge
+            if (Math.random() < playerStats.dodgeChance) {
+                damageNumberManager.create(playerCone, '', { isDodge: true });
+                AudioManager.play('hit', 0.2);
+            } else {
+                // Distance-based falloff
+                const falloff = 1.0 - (distanceToPlayer / explosionRadius);
+                const baseDamage = projectile.damage || MORTAR_CONFIG.projectileDamage;
+                let damageTaken = Math.floor(baseDamage * falloff);
+
+                // Apply armor reduction
+                damageTaken = damageTaken * (50 / (50 + playerStats.armor));
+                if (playerIsBoosted) damageTaken *= relicInfo.speed.damageTakenMultiplier;
+
+                if (damageTaken > 0) {
+                    // Check for active shield
+                    const playerShield = gameState.playerShield;
+                    if (playerShield && playerShield.active && playerShield.hp > 0) {
+                        // Shield absorbs damage
+                        playerShield.hp -= damageTaken;
+                        damageNumberManager.create(playerCone, damageTaken, { isShieldBlock: true });
+                        AudioManager.play('hit', 0.4);
+                    } else {
+                        // No shield - damage player
+                        playerHealth -= damageTaken;
+                        healthBarElement.style.width = (playerHealth / playerStats.maxHealth) * 100 + '%';
+                        damageNumberManager.create(playerCone, damageTaken, {});
+                        isPlayerHit = true;
+                        hitAnimationTime = 0;
+                        AudioManager.play('hit', 0.8);
+                    }
+                }
+            }
+
+            // Update game state
+            gameState.playerHealth = playerHealth;
+            gameState.isPlayerHit = isPlayerHit;
+            gameState.hitAnimationTime = hitAnimationTime;
+        }
+
+        // TODO: Add AoE damage to relics if needed
+    }
+
     // ===== Enemy Projectile Update =====
     /**
      * Update enemy projectiles - movement and collision
@@ -287,6 +369,88 @@ export function createCombatSystem({
         for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
             const projectile = enemyProjectiles[i];
             let projectileConsumed = false;
+
+            // Handle lobbing projectiles (mortars) differently
+            if (projectile.isLobbing) {
+                const delta = 1.0 / 60; // Assume 60 FPS
+
+                // Apply gravity
+                if (!projectile.velocity) {
+                    console.warn('Lobbing projectile missing velocity!');
+                    objectPools.enemyProjectiles.release(projectile);
+                    enemyProjectiles.splice(i, 1);
+                    continue;
+                }
+
+                // Boss missile homing behavior
+                if (projectile.isBossProjectile && projectile.impactPosition) {
+                    // Calculate horizontal distance to target
+                    const currentPos = projectile.mesh.position;
+                    const targetPos = projectile.impactPosition;
+                    const dx = targetPos.x - currentPos.x;
+                    const dz = targetPos.z - currentPos.z;
+                    const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+
+                    // If close enough horizontally and above target, start homing
+                    const homingThreshold = 80; // Start homing within this distance
+                    if (horizontalDist < homingThreshold && currentPos.y > 20) {
+                        // Apply additional downward acceleration toward target center
+                        const homingStrength = 1.0 - (horizontalDist / homingThreshold); // Stronger when closer
+                        const directionToTarget = new THREE.Vector3(
+                            dx / horizontalDist,
+                            -1.5, // Strong downward component
+                            dz / horizontalDist
+                        ).normalize();
+
+                        const homingAcceleration = 800 * homingStrength; // Strong acceleration
+                        const homingVelocity = directionToTarget.multiplyScalar(homingAcceleration * delta);
+                        projectile.velocity.add(homingVelocity);
+
+                        // Limit velocity to prevent extreme speeds
+                        const maxSpeed = 500;
+                        if (projectile.velocity.length() > maxSpeed) {
+                            projectile.velocity.normalize().multiplyScalar(maxSpeed);
+                        }
+                    } else {
+                        // Normal gravity when not homing
+                        projectile.velocity.y += MORTAR_CONFIG.gravity * delta;
+                    }
+                } else {
+                    // Regular mortar - normal gravity
+                    projectile.velocity.y += MORTAR_CONFIG.gravity * delta;
+                }
+
+                // Update position based on velocity
+                const movement = projectile.velocity.clone().multiplyScalar(delta);
+                projectile.mesh.position.add(movement);
+
+                // Rotate to face velocity direction
+                if (projectile.velocity.length() > 0) {
+                    const angle = Math.atan2(projectile.velocity.z, projectile.velocity.x);
+                    projectile.mesh.rotation.y = angle;
+                    const pitch = Math.atan2(
+                        projectile.velocity.y,
+                        Math.sqrt(projectile.velocity.x ** 2 + projectile.velocity.z ** 2)
+                    );
+                    projectile.mesh.rotation.z = -pitch;
+                }
+
+                // Check for ground impact
+                if (projectile.mesh.position.y <= 0) {
+                    // Handle impact
+                    handleMortarImpact(projectile, gameState);
+
+                    // Remove projectile
+                    objectPools.enemyProjectiles.release(projectile);
+                    enemyProjectiles.splice(i, 1);
+                    continue;
+                }
+
+                // No other collisions for lobbing projectiles
+                continue;
+            }
+
+            // Normal horizontal projectile logic
             const travelDistance = BASE_ENEMY_PROJECTILE_SPEED * gameSpeedMultiplier;
             projectile.mesh.position.addScaledVector(projectile.direction, travelDistance);
             spatialGrid.add(projectile);
@@ -475,6 +639,7 @@ export function createCombatSystem({
         updateBeams,
         calculateArmorReduction,
         calculateCritical,
+        handleMortarImpact,
 
         // Getters/setters for internal state
         getLastShotTime: () => lastShotTime,

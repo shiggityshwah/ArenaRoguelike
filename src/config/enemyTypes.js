@@ -51,6 +51,32 @@ const enemyPrototypes = {
         baseHealth: 1, healthRand: 0, healthLevelScale: 0, // Takes 1 hit when vulnerable
         baseSpeed: 0.2, speedLevelScale: 0.02,
         contactDamage: 10,
+    },
+    swarm: {
+        geometry: () => new THREE.IcosahedronGeometry(4),
+        material: new THREE.MeshStandardMaterial({
+            color: 0x00FFAA,
+            emissive: 0x00FFAA,
+            emissiveIntensity: 0.8,
+            metalness: 0.7,
+            roughness: 0.3
+        }),
+        baseHealth: 15, healthRand: 5, healthLevelScale: 3, // Low individual health (4-10 members total)
+        baseSpeed: 0.25, speedLevelScale: 0.025, // Fast for responsive flocking
+        contactDamage: 5, // Low individual damage
+    },
+    mortar: { // Artillery/Mortar enemy
+        geometry: () => new THREE.CylinderGeometry(7, 9, 14, 8),
+        material: new THREE.MeshStandardMaterial({
+            color: 0x4B7F52,      // Military green
+            emissive: 0x6B9F62,   // Lighter green glow
+            emissiveIntensity: 0.5,
+            metalness: 0.7,
+            roughness: 0.4
+        }),
+        baseHealth: 80, healthRand: 40, healthLevelScale: 18, // Medium-high durability
+        baseSpeed: 0.15, speedLevelScale: 0.015, // Slow but mobile (3x faster than original)
+        contactDamage: 20, // Medium contact damage
     }
 };
 

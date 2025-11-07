@@ -318,6 +318,105 @@ export default function createRelicCombatStrategies(dependencies) {
                     });
                 }
             }
+        },
+        droneSwarm: { // Cyan Drone Swarm
+            onActivate(relic) {
+                const info = relicInfo.droneSwarm;
+                relic.drones = [];
+
+                const angleStep = (Math.PI * 2) / info.droneCount;
+
+                for (let i = 0; i < info.droneCount; i++) {
+                    const droneGeometry = new THREE.TetrahedronGeometry(4);
+                    const droneMaterial = new THREE.MeshStandardMaterial({
+                        color: info.color,
+                        emissive: info.color,
+                        emissiveIntensity: 0.8,
+                        metalness: 0.7,
+                        roughness: 0.3
+                    });
+                    const drone = new THREE.Mesh(droneGeometry, droneMaterial);
+
+                    // Initialize orbit angle
+                    drone.userData.orbitAngle = angleStep * i;
+                    drone.userData.lastShotTime = 0;
+
+                    scene.add(drone);
+                    relic.drones.push(drone);
+                }
+            },
+            update(relic, now, delta) {
+                const info = relicInfo.droneSwarm;
+                const gameSpeedMultiplier = getGameSpeedMultiplier();
+                const rotationRadians = (info.orbitSpeed * Math.PI * delta) / 180;
+
+                if (!relic.drones) return;
+
+                // Update each drone's orbit and shooting
+                relic.drones.forEach((drone) => {
+                    // Rotate orbit
+                    drone.userData.orbitAngle += rotationRadians;
+                    const angle = drone.userData.orbitAngle;
+
+                    // Position on circle around relic
+                    drone.position.set(
+                        relic.relic.position.x + Math.cos(angle) * info.orbitRadius,
+                        relic.relic.position.y,
+                        relic.relic.position.z + Math.sin(angle) * info.orbitRadius
+                    );
+
+                    // Rotate drone to face forward in orbit
+                    drone.rotation.y = angle + Math.PI / 2;
+
+                    // Individual drone shooting logic
+                    if (now - drone.userData.lastShotTime >= info.cooldown / gameSpeedMultiplier) {
+                        const potentialTargets = spatialGrid.getNearby({
+                            mesh: { position: drone.position },
+                            radius: info.range
+                        });
+
+                        // Find nearest enemy to THIS drone
+                        let nearestEnemy = null;
+                        let minDistance = info.range;
+                        for (const enemy of potentialTargets) {
+                            if (!enemy.health || enemy.health <= 0) continue;
+                            const distance = drone.position.distanceTo(enemy.mesh.position);
+                            if (distance < minDistance) {
+                                minDistance = distance;
+                                nearestEnemy = enemy;
+                            }
+                        }
+
+                        if (nearestEnemy) {
+                            drone.userData.lastShotTime = now;
+
+                            // Create projectile from drone position
+                            const p = objectPools.relicProjectiles.get();
+                            p.mesh.material.color.set(info.color);
+                            p.mesh.position.copy(drone.position);
+                            p.direction = new THREE.Vector3()
+                                .subVectors(nearestEnemy.mesh.position, drone.position)
+                                .normalize();
+                            p.speed = 5;
+                            p.range = info.range;
+                            p.damage = info.droneDamage;
+                            p.distanceTraveled = 0;
+                            p.type = 'drone_shot';
+                            relicProjectiles.push(p);
+                        }
+                    }
+                });
+            },
+            onDeactivate(relic) {
+                if (relic.drones) {
+                    relic.drones.forEach(drone => {
+                        scene.remove(drone);
+                        drone.geometry.dispose();
+                        drone.material.dispose();
+                    });
+                    relic.drones = [];
+                }
+            }
         }
     };
 }

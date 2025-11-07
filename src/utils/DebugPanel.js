@@ -337,7 +337,7 @@ export class DebugPanel {
      * Create Enemy Spawn Panel
      */
     createEnemySpawnPanel(container) {
-        const enemyTypes = ['box', 'shooter', 'tank', 'berserker', 'magnetic', 'elite', 'phantom'];
+        const enemyTypes = ['box', 'shooter', 'tank', 'berserker', 'magnetic', 'elite', 'phantom', 'swarm', 'mortar'];
 
         const content = `
             <div style="margin-bottom: 10px;">
@@ -349,10 +349,19 @@ export class DebugPanel {
                 </div>
             </div>
             <div style="margin-bottom: 10px;">
-                <label class="debug-label">
-                    <input type="checkbox" class="debug-checkbox" id="spawn-as-boss">
-                    <span>Spawn as Boss (2.5x scale, 5x HP)</span>
-                </label>
+                <strong style="color: #ffff00;">Enemy Tier:</strong>
+                <div style="margin: 5px 0;">
+                    <label style="display: block; margin: 3px 0;">
+                        <input type="radio" name="enemy-tier" value="normal" checked>
+                        <span>Normal (1x stats)</span>
+                    </label>
+                    <label style="display: block; margin: 3px 0;">
+                        <input type="radio" name="enemy-tier" value="elite">
+                        <span>Elite (2.5x HP, 1.5x scale/dmg)</span>
+                    </label>
+                </div>
+            </div>
+            <div style="margin-bottom: 10px;">
                 <div class="debug-label">
                     <span>Quantity:</span>
                     <span id="spawn-quantity-value">1</span>
@@ -379,9 +388,9 @@ export class DebugPanel {
         // Setup event listeners
         for (const type of enemyTypes) {
             document.getElementById(`spawn-enemy-${type}`).addEventListener('click', () => {
-                const isBoss = document.getElementById('spawn-as-boss').checked;
+                const tier = document.querySelector('input[name="enemy-tier"]:checked').value;
                 const quantity = parseInt(document.getElementById('spawn-quantity').value);
-                this.controls.spawnEnemy(type, isBoss, quantity);
+                this.controls.spawnEnemy(type, tier, quantity);
             });
         }
 
@@ -699,7 +708,7 @@ export class DebugPanel {
      * Create Boss Panel (integrated from BossTesting.js)
      */
     createBossPanel(container) {
-        const bossTypes = ['box', 'shooter', 'tank', 'berserker', 'magnetic', 'elite', 'phantom'];
+        const bossTypes = ['box', 'shooter', 'tank', 'berserker', 'magnetic', 'elite', 'phantom', 'swarm', 'mortar'];
         const bossNames = {
             box: 'Cube King',
             shooter: 'Artillery Tower',
@@ -707,7 +716,9 @@ export class DebugPanel {
             berserker: 'Phantom Blade',
             magnetic: 'Void Core',
             elite: 'Warlord',
-            phantom: 'Shade Monarch'
+            phantom: 'Shade Monarch',
+            swarm: 'The Hivemind',
+            mortar: 'Cold-blooded Mortar'
         };
 
         const content = `

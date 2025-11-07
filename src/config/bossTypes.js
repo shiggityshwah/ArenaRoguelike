@@ -675,6 +675,142 @@ const bossTypes = {
       },
     ],
   },
+
+  /**
+   * THE HIVEMIND - Swarm Boss
+   * Mega-swarm of 20-30+ drones with coordinated flocking
+   * Note: Swarm bosses spawn multiple entities, handled specially in enemySpawning.js
+   */
+  swarm: {
+    name: 'The Hivemind',
+    baseName: 'swarm',
+    scale: 1.5, // Slightly larger individual drones
+    baseHealth: 1200, // Total health distributed across all members
+    healthScaling: 0.12, // +12% per wave
+    contactDamage: 8, // Higher than regular swarm members
+
+    // Visual properties
+    color: 0x00FFAA,
+    emissiveColor: 0x00FFFF,
+    emissiveIntensity: 1.0,
+
+    // Boss-specific swarm properties
+    memberCount: [20, 30], // Spawn 20-30 members
+    memberHealthMultiplier: 1.5, // Each member has more health
+    formationTightness: 0.7, // Tighter formation than regular swarms
+
+    // Phases
+    phases: [
+      {
+        name: 'Synchronized Assault',
+        healthPercent: 1.0,
+        minHealthPercent: 0.5,
+        moveSpeedMultiplier: 1.0,
+        behaviors: {
+          swarmFormation: {
+            enabled: true,
+            pattern: 'sphere', // Members orbit in 3D sphere
+            rotationSpeed: 1.0,
+          },
+        },
+      },
+      {
+        name: 'Desperate Swarm',
+        healthPercent: 0.5,
+        minHealthPercent: 0.0,
+        moveSpeedMultiplier: 1.3,
+        colorShift: 0xFF0000, // Turn red when low health
+        behaviors: {
+          swarmFormation: {
+            enabled: true,
+            pattern: 'aggressive', // Break formation, rush player
+            rotationSpeed: 2.0,
+          },
+        },
+      },
+    ],
+  },
+  mortar: {
+    name: 'Cold-blooded Mortar',
+    baseName: 'mortar',
+    scale: 4.0,
+    baseHealth: 2500,
+    healthScaling: 0.15,
+    contactDamage: 30,
+
+    color: 0x4B7F52,
+    emissiveColor: 0x6B9F62,
+    emissiveIntensity: 1.2,
+
+    phases: [
+      {
+        name: 'Strategic Bombardment',
+        healthPercent: 1.0,
+        minHealthPercent: 0.5,
+        moveSpeedMultiplier: 0.8, // Mobile but slow
+        maintainDistance: 220, // Kite away from player
+
+        behaviors: {
+          lineBarrage: {
+            enabled: true,
+            cooldown: 8.0,
+            projectileCount: 5,
+            lineSpacing: 40,
+            staggerDelay: 0.2,
+          },
+          vShapeBarrage: {
+            enabled: true,
+            cooldown: 9.0,
+            projectileCount: 7,
+            vAngle: 60,
+          },
+          spreadBarrage: {
+            enabled: true,
+            cooldown: 10.0,
+            projectileCount: 7,
+            arcDegrees: 90,
+          },
+        },
+      },
+      {
+        name: 'Desperate Salvo',
+        healthPercent: 0.5,
+        minHealthPercent: 0.0,
+        moveSpeedMultiplier: 1.0, // Faster when panicking
+        maintainDistance: 250, // Kite further away
+        colorShift: 0xFF0000, // Shift to red when low health
+
+        behaviors: {
+          circleBarrage: {
+            enabled: true,
+            cooldown: 12.0,
+            projectileCount: 12,
+            radius: 80,
+          },
+          spiralBarrage: {
+            enabled: true,
+            cooldown: 11.0,
+            projectileCount: 15,
+            angleStep: 30,
+            radialStep: 20,
+          },
+          crossBarrage: {
+            enabled: true,
+            cooldown: 9.0,
+            armLength: 100,
+            projectilesPerArm: 3,
+          },
+          randomScatter: {
+            enabled: true,
+            cooldown: 7.0,
+            projectileCount: 10,
+            maxRadius: 100,
+            minSpacing: 30,
+          },
+        },
+      },
+    ],
+  },
 };
 
 /**
@@ -688,6 +824,8 @@ export const bossUnlockLevels = {
   magnetic: 5,
   elite: 6,
   phantom: 7,
+  swarm: 8,
+  mortar: 10,
 };
 
 /**
@@ -697,7 +835,7 @@ export const bossUnlockLevels = {
  */
 export function getAvailableBossTypes(level) {
   return Object.keys(bossUnlockLevels).filter(
-    (bossType) => bossUnlockLevels[bossType] <= level
+    (bossType) => bossUnlockLevels[bossType] <= level && bossType !== 'swarm' && bossType !== 'mortar' // Swarm and mortar excluded (use special spawn systems)
   );
 }
 

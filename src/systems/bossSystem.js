@@ -643,6 +643,9 @@ function executeAttackPattern(boss, gameState) {
     case 'phantom':
       executeShadeMonarchAttack(boss, behaviors, gameState);
       break;
+    case 'mortar':
+      executeMortarBossAttack(boss, behaviors, gameState);
+      break;
   }
 }
 
@@ -1234,6 +1237,104 @@ function executeShadeMonarchAttack(boss, behaviors, gameState) {
 
     boss.attackCooldown = teleportData.cooldown;
   }
+}
+
+/**
+ * Execute Mortar Boss (Artillery Siege) attacks
+ */
+function executeMortarBossAttack(boss, behaviors, gameState) {
+  const { scene, playerCone, enemyProjectiles, objectPools, AreaWarningManager, calculateLobTrajectory, MORTAR_CONFIG } = gameState;
+
+  // Don't attack during spawn animation
+  if (boss.spawning || !boss.mesh || !playerCone) {
+    boss.attackCooldown = 1.0;
+    return;
+  }
+
+  // Initialize attack pattern rotation
+  if (!boss.mortarAttackIndex) {
+    boss.mortarAttackIndex = 0;
+  }
+
+  const playerPos = playerCone.position.clone();
+  const bossPos = boss.mesh.position.clone();
+
+  // Simple mortar barrage - fire 3-5 mortars in a pattern
+  const mortarCount = 3 + Math.floor(Math.random() * 3); // 3-5 mortars
+  const pattern = Math.random();
+
+  for (let i = 0; i < mortarCount; i++) {
+    let impactPos;
+
+    if (pattern < 0.33) {
+      // Line pattern toward player
+      const direction = new THREE.Vector3().subVectors(playerPos, bossPos).normalize();
+      const distance = 50 + (i * 40);
+      impactPos = bossPos.clone().add(direction.multiplyScalar(distance));
+    } else if (pattern < 0.66) {
+      // Circle around player
+      const angle = (Math.PI * 2 / mortarCount) * i;
+      const radius = 60;
+      impactPos = playerPos.clone().add(new THREE.Vector3(
+        Math.cos(angle) * radius,
+        0,
+        Math.sin(angle) * radius
+      ));
+    } else {
+      // Random scatter near player
+      const offsetX = (Math.random() - 0.5) * 120;
+      const offsetZ = (Math.random() - 0.5) * 120;
+      impactPos = playerPos.clone().add(new THREE.Vector3(offsetX, 0, offsetZ));
+    }
+
+    impactPos.y = 0;
+
+    // Calculate trajectory first to get actual flight time
+    const startPos = bossPos.clone();
+    startPos.y = 20; // Projectile start height
+    const trajectory = calculateLobTrajectory(
+      startPos,
+      impactPos,
+      MORTAR_CONFIG.projectileFlightTime,
+      MORTAR_CONFIG.gravity,
+      MORTAR_CONFIG.lobApex * 1.3 // Higher arc for boss
+    );
+
+    // Create ground warning with actual flight time as duration
+    AreaWarningManager.create(
+      impactPos,
+      MORTAR_CONFIG.explosionRadius * 1.2, // Slightly larger for boss
+      0xFF4500, // Orange warning for boss
+      trajectory.impactTime, // Use calculated flight time
+      'gradient'
+    );
+
+    // Schedule projectile launch with small stagger for visual effect
+    const launchDelay = 0.15 + (i * 0.1); // Small initial delay + stagger
+    setTimeout(() => {
+      if (!boss.isActive) return;
+
+      const proj = objectPools.enemyProjectiles.get();
+      proj.mesh.position.copy(bossPos);
+      proj.mesh.position.y = 20; // Start higher for boss
+
+      // Use pre-calculated velocity
+      proj.velocity = trajectory.velocity.clone();
+      proj.impactPosition = impactPos.clone();
+      proj.damage = MORTAR_CONFIG.projectileDamage * 1.5; // More damage for boss
+      proj.explosionRadius = MORTAR_CONFIG.explosionRadius * 1.2;
+      proj.isLobbing = true;
+      proj.isBossProjectile = true;
+      proj.distanceTraveled = 0;
+      proj.range = 999;
+
+      enemyProjectiles.push(proj);
+    }, launchDelay * 1000);
+  }
+
+  // Set cooldown based on phase
+  const baseCooldown = boss.currentPhase === 0 ? 5.0 : 3.5;
+  boss.attackCooldown = baseCooldown;
 }
 
 /**

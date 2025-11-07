@@ -23,6 +23,9 @@ const relicInfo = {
     },
     luck: { name: 'Precision Striker', shape: 'sphere', health: 2000, geometry: new THREE.SphereGeometry(24, 32, 32), color: 0xFFFFFF,
         range: 200, cooldown: 5.0, duration: 3.0, damagePerSecond: 200, radius: 25
+    },
+    droneSwarm: { name: 'Drone Swarm', shape: 'dodecahedron', health: 1800, geometry: new THREE.DodecahedronGeometry(24), color: 0x00FFAA,
+        range: 220, cooldown: 0.8, droneCount: 4, orbitRadius: 35, orbitSpeed: 90, droneDamage: 80
     }
 };
 

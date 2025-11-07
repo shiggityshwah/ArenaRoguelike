@@ -29,7 +29,9 @@ const enemyUnlockLevels = {
     berserker: 4,
     magnetic: 5,
     elite: 6,
-    phantom: 7
+    phantom: 7,
+    swarm: 8,
+    mortar: 10  // Late-game artillery enemy
 };
 
 // Spawn weights for weighted random selection
@@ -38,14 +40,23 @@ const spawnWeights = {
     tank: 15,
     berserker: 12,
     magnetic: 8,
+    swarm: 7,
+    mortar: 6,  // Between magnetic and elite
     elite: 5,
     phantom: 3
 };
 
+// Tier multipliers for enemy difficulty scaling
+const TIER_MULTIPLIERS = {
+    normal: { health: 1.0, scale: 1.0, damage: 1.0 },
+    elite: { health: 2.5, scale: 1.5, damage: 1.5 },
+    boss: { health: 5.0, scale: 2.5, damage: 2.0 }
+};
+
 /**
  * Spawns a specific enemy type
- * @param {string} type - Enemy type to spawn (box, shooter, tank, berserker, magnetic, elite, phantom)
- * @param {boolean} isBoss - Whether to spawn as a boss (default: false)
+ * @param {string} type - Enemy type to spawn (box, shooter, tank, berserker, magnetic, elite, phantom, swarm)
+ * @param {string} tier - Enemy tier: 'normal', 'elite', or 'boss' (default: 'normal')
  * @param {Object} dependencies - Object containing all external dependencies
  *
  * Dependencies:
@@ -60,7 +71,7 @@ const spawnWeights = {
  * - createGravityVortex: Function from effects.js
  * - gravityWellEffects: Array of gravity well effects
  */
-export function spawnSpecificEnemy(type, isBoss = false, dependencies) {
+export function spawnSpecificEnemy(type, tier = 'normal', dependencies) {
     const {
         scene,
         enemies,
@@ -78,10 +89,15 @@ export function spawnSpecificEnemy(type, isBoss = false, dependencies) {
     const proto = enemyPrototypes[type];
     if (!proto) return;
 
-    const health = (isBoss ? proto.baseHealth * 5 : proto.baseHealth + Math.random() * proto.healthRand + (level * proto.healthLevelScale));
+    // Get tier multipliers
+    const mult = TIER_MULTIPLIERS[tier] || TIER_MULTIPLIERS.normal;
+
+    // Calculate stats with tier multipliers
+    const baseHealth = proto.baseHealth + Math.random() * proto.healthRand + (level * proto.healthLevelScale);
+    const health = baseHealth * mult.health;
     const baseSpeed = proto.baseSpeed + level * proto.speedLevelScale;
     const speed = baseSpeed * gameSpeedMultiplier;
-    const scale = isBoss ? 2.5 : 1;
+    const scale = mult.scale;
 
     let enemyMesh;
     if (proto.material) {
@@ -118,8 +134,8 @@ export function spawnSpecificEnemy(type, isBoss = false, dependencies) {
         maxHealth: health,
         type: type,
         radius: (type === 'tank' ? 12.5 : 8) * scale,
-        contactDamage: proto.contactDamage * (isBoss ? 2 : 1),
-        isBoss: isBoss,
+        contactDamage: proto.contactDamage * mult.damage,
+        isBoss: tier === 'boss', // Only 'boss' tier counts as boss
         isGeometryShared: type === 'shooter',
         hitEffectUntil: null,
         baseEmissiveIntensity: enemyMesh.material.emissiveIntensity,
@@ -150,15 +166,16 @@ export function spawnSpecificEnemy(type, isBoss = false, dependencies) {
     scene.add(enemyMesh);
     enemies.push(enemyData);
     enemyCounts[type] = (enemyCounts[type] || 0) + 1;
-    if (isBoss) {
+    if (tier === 'boss') {
         const newCount = getBossCount() + 1;
         setBossCount(newCount);
     }
 }
 
 /**
- * Spawns a random boss enemy
+ * Spawns a random boss enemy (OLD SYSTEM - enemy-based boss)
  * @param {Object} dependencies - Object containing all external dependencies
+ * @deprecated Use spawnNewBoss() for true boss system
  *
  * Dependencies:
  * - All dependencies required by spawnSpecificEnemy
@@ -171,7 +188,7 @@ export function spawnBoss(dependencies) {
 
     const bossTypes = ['tank', 'elite', 'magnetic', 'phantom'];
     const randomBossType = bossTypes[Math.floor(Math.random() * bossTypes.length)];
-    spawnSpecificEnemy(randomBossType, true, dependencies);
+    spawnSpecificEnemy(randomBossType, 'boss', dependencies);
 }
 
 /**
@@ -235,7 +252,12 @@ export function spawnEnemy(dependencies) {
     if (typeToSpawn === null || nonBossCount === 0 || (boxCount / nonBossCount < MIN_BOX_RATIO)) {
         spawnSpecificEnemy('box', false, dependencies);
     } else {
-        spawnSpecificEnemy(typeToSpawn, false, dependencies);
+        // Swarms are special - they spawn multiple entities
+        if (typeToSpawn === 'swarm') {
+            spawnSwarm(dependencies);
+        } else {
+            spawnSpecificEnemy(typeToSpawn, false, dependencies);
+        }
     }
 }
 
@@ -280,6 +302,13 @@ export function spawnNewBoss(dependencies) {
 
     // Get boss type - use specified type or get random based on player level
     const bossType = specifiedBossType || getRandomBossType(level);
+
+    // Note: 'swarm' bosses are not handled here - they use the enemy system
+    // Spawn swarm bosses via spawnBossSwarm() directly (see DebugControls.spawnBoss)
+    if (bossType === 'swarm') {
+        console.warn('Cannot spawn swarm boss through spawnNewBoss - use spawnBossSwarm() instead');
+        return null;
+    }
 
     // Determine spawn position (far from player)
     let spawnPosition;
@@ -355,6 +384,184 @@ export function spawnWave(count, dependencies) {
  */
 export function spawnTrickleEnemy(dependencies) {
     // Force spawn a 'box' enemy by calling spawnSpecificEnemy directly
-    const enemy = spawnSpecificEnemy('box', false, dependencies);
+    const enemy = spawnSpecificEnemy('box', 'normal', dependencies);
     return enemy;
+}
+
+/**
+ * Spawns a swarm enemy (group of 4-10 small drones with flocking behavior)
+ * @param {Object} dependencies - Dependencies for enemy spawning
+ * @param {string} tier - Swarm tier: 'normal', 'elite', or 'boss' (default: 'normal')
+ * @returns {Array} Array of spawned swarm members
+ */
+export function spawnSwarm(dependencies, tier = 'normal') {
+    const {
+        scene,
+        enemies,
+        enemyPrototypes,
+        playerCone,
+        enemyCounts,
+        level,
+        gameSpeedMultiplier,
+        waveNumber
+    } = dependencies;
+
+    const proto = enemyPrototypes.swarm;
+    if (!proto) return [];
+
+    // Generate unique swarm ID
+    const swarmId = `swarm_${Date.now()}_${Math.random()}`;
+
+    // Determine member count and multipliers based on tier
+    let memberCount;
+    let mult;
+
+    if (tier === 'boss') {
+        // Boss variant: The Hivemind (20-30 members)
+        memberCount = 20 + Math.floor(Math.random() * 11); // 20-30
+        mult = { health: 1.5, scale: 1.5, damage: 1.6 }; // Boss swarms are tougher
+    } else if (tier === 'elite') {
+        // Elite swarm: More members, stronger (10-15 members)
+        memberCount = 10 + Math.floor(Math.random() * 6); // 10-15
+        mult = TIER_MULTIPLIERS.elite; // 2.5x health, 1.5x scale/damage
+    } else {
+        // Regular swarm (4-10 members, increases slightly with level)
+        const baseMemberCount = 4 + Math.floor(Math.random() * 7); // 4-10
+        const levelBonus = Math.min(Math.floor(level / 5), 3); // +1 member every 5 levels, max +3
+        memberCount = baseMemberCount + levelBonus;
+        mult = TIER_MULTIPLIERS.normal; // 1x stats
+    }
+
+    // Calculate spawn center (far from player)
+    let spawnCenter;
+    let attempts = 0;
+    do {
+        const x = (Math.random() - 0.5) * (ARENA_PLAYABLE_HALF_SIZE * 2);
+        const z = (Math.random() - 0.5) * (ARENA_PLAYABLE_HALF_SIZE * 2);
+        spawnCenter = new THREE.Vector3(x, 5 * mult.scale, z); // Match enemy spawn height
+        attempts++;
+        if (attempts > 100) {
+            console.warn("Could not place swarm far from player after 100 attempts.");
+            break;
+        }
+    } while (spawnCenter.distanceTo(playerCone.position) < 200);
+
+    const swarmMembers = [];
+    const formationRadius = 25; // Spread members in sphere
+
+    for (let i = 0; i < memberCount; i++) {
+        // Position members in spherical formation
+        const phi = Math.acos(-1 + (2 * i) / memberCount); // Golden spiral
+        const theta = Math.sqrt(memberCount * Math.PI) * phi;
+
+        const x = spawnCenter.x + formationRadius * Math.cos(theta) * Math.sin(phi);
+        const y = 5 * mult.scale; // Match other enemy Y positions (scaled by tier)
+        const z = spawnCenter.z + formationRadius * Math.sin(theta) * Math.sin(phi);
+
+        // Calculate health and speed (with tier multipliers)
+        const baseHealth = proto.baseHealth + Math.random() * proto.healthRand + (level * proto.healthLevelScale);
+        const health = baseHealth * mult.health;
+        const baseSpeed = proto.baseSpeed + level * proto.speedLevelScale;
+        const speed = baseSpeed * gameSpeedMultiplier;
+
+        // Create mesh with tier scaling
+        const material = proto.material.clone();
+        const geometry = proto.geometry();
+        const enemyMesh = new THREE.Mesh(geometry, material);
+        enemyMesh.position.set(x, y, z);
+        enemyMesh.scale.set(mult.scale, mult.scale, mult.scale);
+
+        // Boss/Elite swarms glow brighter
+        if (tier === 'boss') {
+            material.emissiveIntensity = 1.0;
+        } else if (tier === 'elite') {
+            material.emissiveIntensity = 0.9;
+        }
+
+        // Create wireframe for tech look
+        const wireframeGeometry = new THREE.WireframeGeometry(enemyMesh.geometry);
+        const wireframeColor = tier === 'boss' ? 0x00FFFF : (tier === 'elite' ? 0x00FF88 : 0x00FFAA);
+        const wireframeMaterial = new THREE.LineBasicMaterial({ color: wireframeColor });
+        const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
+        enemyMesh.add(wireframe);
+
+        // Create enemy data with swarm properties
+        const enemyData = {
+            mesh: enemyMesh,
+            speed: speed,
+            baseSpeed: baseSpeed,
+            health: health,
+            maxHealth: health,
+            type: 'swarm',
+            radius: 5 * mult.scale,
+            contactDamage: proto.contactDamage * mult.damage,
+            isBoss: tier === 'boss',
+            isGeometryShared: false,
+            hitEffectUntil: null,
+            baseEmissiveIntensity: enemyMesh.material.emissiveIntensity,
+            pullForces: new THREE.Vector3(),
+            wireframe: wireframe,
+            initialColor: enemyMesh.material.color.clone(),
+
+            // Swarm-specific properties
+            swarmId: swarmId,
+            memberIndex: i,
+            isSwarmParent: i === 0, // First member tracks the group
+            swarmMembers: i === 0 ? [] : null, // Only parent has member array
+            isLastSwarmMember: false, // Updated when members die
+            isBossSwarm: tier === 'boss', // Track if part of boss swarm
+
+            // Flocking behavior vectors
+            separationForce: new THREE.Vector3(),
+            alignmentForce: new THREE.Vector3(),
+            cohesionForce: new THREE.Vector3(),
+            flockingVelocity: new THREE.Vector3()
+        };
+
+        scene.add(enemyMesh);
+        enemies.push(enemyData);
+        swarmMembers.push(enemyData);
+    }
+
+    // Link all members to parent
+    if (swarmMembers.length > 0 && swarmMembers[0].swarmMembers) {
+        swarmMembers[0].swarmMembers = swarmMembers;
+    }
+
+    // Update counts
+    enemyCounts.swarm = (enemyCounts.swarm || 0) + 1;
+
+    const swarmTypeNames = {
+        normal: 'swarm',
+        elite: 'ELITE swarm',
+        boss: 'THE HIVEMIND (Boss Swarm)'
+    };
+    const swarmType = swarmTypeNames[tier] || 'swarm';
+    console.log(`Spawned ${swarmType} with ${memberCount} members (level ${level})`);
+    return swarmMembers;
+}
+
+/**
+ * Spawns The Hivemind boss (mega-swarm variant)
+ * @param {Object} dependencies - Dependencies for boss spawning
+ * @returns {Array} Array of spawned boss swarm members
+ */
+export function spawnBossSwarm(dependencies) {
+    const { getBossCount, setBossCount, MAX_BOSSES } = dependencies;
+
+    if (getBossCount() >= MAX_BOSSES) {
+        console.log('Max bosses reached, cannot spawn The Hivemind');
+        return [];
+    }
+
+    // Spawn boss variant
+    const members = spawnSwarm(dependencies, 'boss');
+
+    // Increment boss count (only count once for the whole swarm)
+    if (members.length > 0) {
+        const newCount = getBossCount() + 1;
+        setBossCount(newCount);
+    }
+
+    return members;
 }
