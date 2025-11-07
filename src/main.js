@@ -82,6 +82,7 @@ import {
     updateTemporaryEffects
 } from './systems/effects.js';
 import { createPlayerAbilitySystem, ABILITY_DEFINITIONS } from './systems/playerAbilities.js';
+import { createWaveManager } from './systems/waveManager.js';
 
 // ===== Utility Imports =====
 import { TrailRenderer } from './utils/TrailRenderer.js';
@@ -451,6 +452,27 @@ const playerAbilitySystem = createPlayerAbilitySystem({
     AreaWarningManager
 });
 
+// ===== Wave Manager =====
+const waveManager = createWaveManager({
+    scene,
+    enemies,
+    bosses,
+    enemyPrototypes,
+    playerCone,
+    enemyCounts,
+    getBossCount: () => bossCount,
+    setBossCount: (val) => { bossCount = val; },
+    getLevel: () => level,
+    getGameSpeedMultiplier: () => gameSpeedMultiplier,
+    createGravityVortex: (parent, count, radius, color, isRotated) =>
+        createGravityVortex(parent, count, radius, color, isRotated, gravityWellEffects),
+    gravityWellEffects,
+    bossUIManager,
+    updateWaveUI,
+    MAX_BOSSES,
+    MIN_BOX_RATIO
+});
+
 // ===== Dev Mode Hotkeys =====
 if (DEV_MODE) {
     console.log('DEV MODE ENABLED: Use keys 1-0 to toggle abilities');
@@ -571,71 +593,14 @@ function updatePlayerMovement(delta) {
  * Updates enemy AI and movement
  */
 function updateEnemies(delta) {
-    // ===== WAVE + TRICKLE SPAWN SYSTEM =====
+    // ===== WAVE MANAGER SYSTEM =====
+    // New wave management system handles all wave spawning logic
+    if (autoSpawnEnabled) {
+        const currentTime = clock.getElapsedTime();
+        waveManager.update(delta, currentTime);
 
-    // Wave advancement: when all enemies cleared, start new wave
-    if (autoSpawnEnabled && enemies.length === 0) {
-        waveNumber++;
-        waveJustStarted = true;
-        updateWaveUI(waveNumber);
-        console.log(`Wave ${waveNumber} starting`);
-    }
-
-    // Enemy dependencies object (used by all spawn functions)
-    const enemyDependencies = {
-        scene,
-        enemies,
-        enemyPrototypes,
-        playerCone,
-        enemyCounts,
-        getBossCount: () => bossCount,
-        setBossCount: (val) => { bossCount = val; },
-        level,
-        gameSpeedMultiplier,
-        createGravityVortex: (parent, count, radius, color, isRotated) =>
-            createGravityVortex(parent, count, radius, color, isRotated, gravityWellEffects),
-        gravityWellEffects,
-        MAX_BOSSES,
-        MIN_BOX_RATIO
-    };
-
-    // Initial wave spawn: spawn large group of enemies when wave starts
-    if (waveJustStarted && autoSpawnEnabled) {
-        waveJustStarted = false;
-
-        // Boss wave: spawn boss + some enemies
-        if (isBossWave(waveNumber)) {
-            console.log(`Boss wave! Spawning boss...`);
-            spawnNewBoss({
-                scene,
-                level,
-                waveNumber,
-                bosses,
-                bossUIManager,
-                playerCone
-            });
-
-            // Spawn initial enemies alongside boss
-            spawnWave(BOSS_WAVE_ENEMY_COUNT, enemyDependencies);
-        }
-        // Regular wave: spawn full initial wave
-        else {
-            spawnWave(WAVE_INITIAL_SPAWN_COUNT, enemyDependencies);
-        }
-    }
-
-    // Trickle spawn: continuously spawn weak box enemies
-    // During boss fights: only trickle spawning (no large waves)
-    // During regular waves: trickle adds to initial wave
-    const currentTime = clock.getElapsedTime();
-    const shouldTrickleSpawn = autoSpawnEnabled &&
-        enemies.length < maxEnemies &&
-        (currentTime - lastTrickleSpawnTime) >= TRICKLE_SPAWN_INTERVAL &&
-        (bosses.length === 0 || TRICKLE_DURING_BOSS); // Trickle during boss if enabled
-
-    if (shouldTrickleSpawn) {
-        spawnTrickleEnemy(enemyDependencies);
-        lastTrickleSpawnTime = currentTime;
+        // Sync wave number for other systems
+        waveNumber = waveManager.getCurrentWaveNumber();
     }
 
     // Update each enemy
@@ -2137,6 +2102,9 @@ function resetGame() {
     lastTrickleSpawnTime = 0;
     waveJustStarted = false;
     gameSpeedMultiplier = 1.0;
+
+    // Reset wave manager
+    waveManager.reset();
     playerScaleMultiplier = 1.0;
     bossCount = 0;
     isGameOver = false;
@@ -2533,6 +2501,7 @@ if (DEV_MODE) {
 
         // Systems
         abilitySystem: playerAbilitySystem,
+        waveManager: waveManager,
 
         // Config
         enemyPrototypes,
