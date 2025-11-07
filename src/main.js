@@ -2202,6 +2202,29 @@ function resetGame() {
         if (relicGroup.gravityEffect) {
             scene.remove(relicGroup.gravityEffect.mesh);
         }
+        if (relicGroup.auraVisual) {
+            relicGroup.relic.remove(relicGroup.auraVisual);
+            relicGroup.auraVisual.geometry.dispose();
+            relicGroup.auraVisual.material.dispose();
+        }
+        // Clean up summoning circle ring group and all its children
+        if (relicGroup.ring) {
+            relicGroup.ring.traverse((child) => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            });
+            scene.remove(relicGroup.ring);
+        }
+        // Clean up particles
+        if (relicGroup.particles) {
+            relicGroup.particles.geometry.dispose();
+            relicGroup.particles.material.dispose();
+            scene.remove(relicGroup.particles);
+        }
+        // Clean up light
+        if (relicGroup.light) {
+            scene.remove(relicGroup.light);
+        }
     }
     relics.length = 0;
 
