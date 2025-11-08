@@ -303,10 +303,21 @@ export function spawnNewBoss(dependencies) {
     // Get boss type - use specified type or get random based on player level
     const bossType = specifiedBossType || getRandomBossType(level);
 
-    // Note: 'swarm' bosses are not handled here - they use the enemy system
-    // Spawn swarm bosses via spawnBossSwarm() directly (see DebugControls.spawnBoss)
+    // Handle swarm bosses specially - they use the enemy system
     if (bossType === 'swarm') {
-        console.warn('Cannot spawn swarm boss through spawnNewBoss - use spawnBossSwarm() instead');
+        console.log('Spawning Hivemind boss (swarm variant)');
+        const members = spawnBossSwarm(dependencies);
+
+        // Return a pseudo-boss object for tracking
+        if (members.length > 0) {
+            return {
+                bossType: 'swarm',
+                isSwarmBoss: true,
+                members: members,
+                health: members.reduce((sum, m) => sum + m.health, 0),
+                maxHealth: members.reduce((sum, m) => sum + m.maxHealth, 0)
+            };
+        }
         return null;
     }
 

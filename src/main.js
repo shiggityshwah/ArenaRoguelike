@@ -1850,6 +1850,23 @@ function updateBosses(delta) {
                 playerCone.position.add(pullForce);
                 delete playerCone.userData.gravityPull;
             }
+
+            // Apply gravity pull damage over time
+            const gravityDamage = playerCone.userData.gravityPullDamage;
+            if (gravityDamage) {
+                // Apply damage scaled by delta time and armor
+                const damage = (gravityDamage * delta) * (50 / (50 + playerStats.armor));
+                playerHealth -= damage;
+
+                // Show damage number every 0.5 seconds to avoid spam
+                const now = Date.now();
+                if (!boss.lastGravityDamageNumberTime || now - boss.lastGravityDamageNumberTime > 500) {
+                    boss.lastGravityDamageNumberTime = now;
+                    damageNumberManager.create(playerCone, Math.round(damage), { isCritical: false });
+                }
+
+                delete playerCone.userData.gravityPullDamage;
+            }
         }
 
         // Check contact damage with player

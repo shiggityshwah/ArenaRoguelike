@@ -835,7 +835,7 @@ export const bossUnlockLevels = {
  */
 export function getAvailableBossTypes(level) {
   return Object.keys(bossUnlockLevels).filter(
-    (bossType) => bossUnlockLevels[bossType] <= level && bossType !== 'swarm' && bossType !== 'mortar' // Swarm and mortar excluded (use special spawn systems)
+    (bossType) => bossUnlockLevels[bossType] <= level && bossType !== 'mortar' // Mortar excluded (uses special spawn system)
   );
 }
 

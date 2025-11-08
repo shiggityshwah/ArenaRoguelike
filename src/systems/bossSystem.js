@@ -132,13 +132,17 @@ export function createBoss(params) {
   const baseSpeed = enemyConfig.baseSpeed + (level || 0) * (enemyConfig.speedLevelScale || 0.01);
 
   // Calculate ground Y position based on boss type
+  // Keep bosses at reasonable height for combat (player and projectiles are at y~2)
+  // Using base height of 10 for visual elevation while keeping combat viable
   let groundY = 10; // Default for most bosses
   if (bossType === 'box' || bossType === 'tank') {
-    groundY = 5 * bossConfig.scale; // BoxGeometry sits on ground (half height of 10)
+    groundY = Math.min(15, 5 * bossConfig.scale); // BoxGeometry - cap at 15 for large bosses
   } else if (bossType === 'shooter') {
-    groundY = 8 * bossConfig.scale; // Cylinder height/2
+    groundY = Math.min(15, 8 * bossConfig.scale); // Cylinder - cap at 15
+  } else if (bossType === 'berserker') {
+    groundY = 10; // Fixed height for berserker (Phantom Blade) to enable combat
   } else {
-    groundY = 10 * bossConfig.scale; // Most geometries
+    groundY = Math.min(15, 10 * bossConfig.scale); // Most geometries - cap at 15
   }
 
   // Create boss entity
@@ -282,6 +286,45 @@ function initializeBossVisuals(scene, boss, bossConfig) {
 
     mesh.add(fragmentGroup);
     boss.fragmentGroup = fragmentGroup;
+  }
+
+  // Add vacuum area indicator for Void Core (magnetic boss)
+  if (boss.bossType === 'magnetic' && bossConfig.hasVortex) {
+    // Get initial gravity pull range from phase 1
+    const initialRange = bossConfig.phases[0]?.behaviors?.gravityPull?.range || 100;
+
+    // Create ground circle showing vacuum range
+    const vacuumGeometry = new THREE.RingGeometry(initialRange * 0.95, initialRange, 64);
+    const vacuumMaterial = new THREE.MeshBasicMaterial({
+      color: bossConfig.color,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.3,
+    });
+
+    const vacuumCircle = new THREE.Mesh(vacuumGeometry, vacuumMaterial);
+    vacuumCircle.rotation.x = Math.PI / 2;
+    vacuumCircle.position.y = 0.5; // Slightly above ground
+    mesh.add(vacuumCircle);
+
+    boss.vacuumCircle = vacuumCircle;
+    boss.vacuumMaterial = vacuumMaterial;
+
+    // Create inner particle effect circle
+    const innerGeometry = new THREE.CircleGeometry(initialRange * 0.5, 32);
+    const innerMaterial = new THREE.MeshBasicMaterial({
+      color: bossConfig.emissiveColor,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.2,
+    });
+
+    const innerCircle = new THREE.Mesh(innerGeometry, innerMaterial);
+    innerCircle.rotation.x = Math.PI / 2;
+    innerCircle.position.y = 0.6;
+    mesh.add(innerCircle);
+
+    boss.vacuumInnerCircle = innerCircle;
   }
 }
 
@@ -525,6 +568,37 @@ function updateBossVisuals(boss, gameState, delta) {
   if (boss.crown) {
     const healthPercent = boss.health / boss.maxHealth;
     boss.crown.scale.y = Math.max(0.3, healthPercent);
+  }
+
+  // Update vacuum area indicator for Void Core
+  if (boss.vacuumCircle && boss.phaseData.behaviors.gravityPull) {
+    const gravityData = boss.phaseData.behaviors.gravityPull;
+    const targetRange = gravityData.range;
+
+    // Animate circle size to match current phase range
+    if (boss.vacuumCircle.userData.currentRange !== targetRange) {
+      boss.vacuumCircle.userData.currentRange = targetRange;
+
+      // Update geometry to new range
+      boss.vacuumCircle.geometry.dispose();
+      boss.vacuumCircle.geometry = new THREE.RingGeometry(targetRange * 0.95, targetRange, 64);
+
+      // Update inner circle too
+      if (boss.vacuumInnerCircle) {
+        boss.vacuumInnerCircle.geometry.dispose();
+        boss.vacuumInnerCircle.geometry = new THREE.CircleGeometry(targetRange * 0.5, 32);
+      }
+    }
+
+    // Pulse effect
+    const pulse = Math.sin(Date.now() * 0.002) * 0.15 + 0.3;
+    boss.vacuumMaterial.opacity = pulse;
+
+    // Rotate for visual effect
+    boss.vacuumCircle.rotation.z += delta * 0.5;
+    if (boss.vacuumInnerCircle) {
+      boss.vacuumInnerCircle.rotation.z -= delta * 1.0;
+    }
   }
 }
 
@@ -1452,6 +1526,11 @@ function applyGravityPull(boss, gameState) {
     const pullForce = pullDir.multiplyScalar(gravityData.pullStrength);
 
     gameState.playerCone.userData.gravityPull = pullForce;
+
+    // Apply damage over time when in gravity well
+    // Damage increases as player gets closer to boss
+    const damagePerSecond = 5 + (1 - distance / gravityData.range) * 10; // 5-15 DPS based on distance
+    gameState.playerCone.userData.gravityPullDamage = damagePerSecond;
   }
 }
 
@@ -1489,14 +1568,11 @@ function spawnMinionForBoss(type, level, position, gameState) {
   if (enemies.length > initialCount) {
     const minion = enemies[enemies.length - 1];
 
-    // Position is already set by spawnBossMinions (at y=100 to fall)
-    // Don't override it, minions need to fall from sky
-    // The position param already has x/z set correctly, just preserve y
+    // Override position to use boss-specified spawn location
+    // (spawnSpecificEnemy places randomly, but we want minions near boss)
     if (minion && minion.mesh && position) {
-      // Only update X and Z, keep the spawn Y (100) so they fall
-      minion.mesh.position.x = position.x;
-      minion.mesh.position.z = position.z;
-      // minion.mesh.position.y stays at spawn height (100)
+      // Use all coordinates from spawnBossMinions (now at ground level y=10)
+      minion.mesh.position.copy(position);
       return minion;
     }
   }

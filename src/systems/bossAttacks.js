@@ -723,7 +723,7 @@ export function spawnBossMinions(params, spawnEnemyFunction) {
     const angle = (Math.PI * 2 * i) / count;
     const spawnPos = new THREE.Vector3(
       bossPosition.x + Math.cos(angle) * spawnRadius,
-      100, // Spawn height
+      10, // Ground level spawn (enemies don't have falling animation)
       bossPosition.z + Math.sin(angle) * spawnRadius
     );
 
