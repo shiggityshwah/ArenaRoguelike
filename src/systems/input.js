@@ -234,6 +234,43 @@ export function createInputSystem({ renderer, scene }) {
         },
 
         /**
+         * Get tilt input vector for ball physics
+         * Combines keyboard WASD and drag/touch input
+         * @returns {Object} {x, y, magnitude, modifiers: {shift, space}}
+         */
+        getTiltInput() {
+            // Start with keyboard input
+            const keyboard = new THREE.Vector2();
+            if (keyState['KeyW']) keyboard.y -= 1;
+            if (keyState['KeyS']) keyboard.y += 1;
+            if (keyState['KeyA']) keyboard.x -= 1;
+            if (keyState['KeyD']) keyboard.x += 1;
+
+            // Add drag/touch input if active
+            const combined = keyboard.clone();
+            if (isDragging && movementDirection.length() > 0) {
+                // Convert screen drag to world direction
+                // Note: -y because screen y is inverted
+                combined.x += movementDirection.x;
+                combined.y -= movementDirection.y;
+            }
+
+            // Normalize and get magnitude
+            const magnitude = Math.min(combined.length(), 1.0); // Clamp to 1.0
+            const direction = magnitude > 0 ? combined.clone().normalize() : new THREE.Vector2(0, 0);
+
+            return {
+                x: direction.x,
+                y: direction.y,
+                magnitude: magnitude,
+                modifiers: {
+                    shift: keyState['ShiftLeft'] || keyState['ShiftRight'],
+                    space: keyState['Space']
+                }
+            };
+        },
+
+        /**
          * Check if a key is currently pressed
          * @param {string} code - Key code (e.g., 'Space', 'KeyW')
          * @returns {boolean}

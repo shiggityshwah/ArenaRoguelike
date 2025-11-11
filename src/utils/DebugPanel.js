@@ -180,6 +180,7 @@ export class DebugPanel {
         this.createGemPanel(container);
         this.createAbilityPanel(container);
         this.createGameStatePanel(container);
+        this.createBallPhysicsPanel(container);
         this.createBossPanel(container);
         this.createDiagnosticsPanel(container);
     }
@@ -705,6 +706,84 @@ export class DebugPanel {
     }
 
     /**
+     * Create Ball Physics Panel (Phase 1: Tilt-based movement)
+     */
+    createBallPhysicsPanel(container) {
+        // Import physics constants
+        import('../config/physicsConstants.js').then(({ getAllPhysicsParams, setPhysicsParam }) => {
+            const params = getAllPhysicsParams();
+
+            let slidersHTML = '';
+            for (const [path, config] of Object.entries(params)) {
+                const displayName = path.replace(/\./g, ' ').replace(/([A-Z])/g, ' $1').trim();
+                const currentValue = config.value;
+                slidersHTML += `
+                    <div class="debug-label">
+                        <span>${displayName}:</span>
+                        <span id="physics-${path.replace(/\./g, '-')}-value">${currentValue.toFixed(2)}</span>
+                    </div>
+                    <input type="range" class="debug-slider"
+                        id="physics-${path.replace(/\./g, '-')}"
+                        min="${config.min}" max="${config.max}" step="${config.step}"
+                        value="${currentValue}"
+                        data-param-path="${path}">
+                `;
+            }
+
+            const content = `
+                <div style="margin-bottom: 10px; padding: 6px; background: rgba(0,255,255,0.1); border-radius: 4px; font-size: 10px;">
+                    <strong style="color: #00ffff;">Phase 1: Tilt-Based Ball Movement</strong>
+                    <div style="margin-top: 3px; color: #888;">
+                        Control ground tilt with WASD. Shift=full tilt, Space=quarter tilt.
+                    </div>
+                </div>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    ${slidersHTML}
+                </div>
+                <div style="margin-top: 10px;">
+                    <button class="debug-btn" id="physics-reset" style="width: 100%;">
+                        Reset to Defaults
+                    </button>
+                </div>
+            `;
+
+            this.createPanelSection(container, 'ball-physics', 'Ball Physics', '⚽', content);
+
+            // Setup event listeners for sliders
+            for (const [path, config] of Object.entries(params)) {
+                const sliderId = `physics-${path.replace(/\./g, '-')}`;
+                const slider = document.getElementById(sliderId);
+                const valueDisplay = document.getElementById(`${sliderId}-value`);
+
+                if (slider && valueDisplay) {
+                    slider.addEventListener('input', (e) => {
+                        const value = parseFloat(e.target.value);
+                        const paramPath = e.target.getAttribute('data-param-path');
+                        setPhysicsParam(paramPath, value);
+                        valueDisplay.textContent = value.toFixed(2);
+
+                        // Update ball radius in real-time if changed
+                        if (paramPath === 'ball.radius' && this.gameState.tiltPhysics) {
+                            this.gameState.tiltPhysics.updateBallRadius(value);
+                        }
+                    });
+                }
+            }
+
+            // Reset button
+            const resetBtn = document.getElementById('physics-reset');
+            if (resetBtn) {
+                resetBtn.addEventListener('click', () => {
+                    // Reload the page to reset physics constants
+                    if (confirm('Reset all physics parameters to defaults? This will reload the page.')) {
+                        location.reload();
+                    }
+                });
+            }
+        });
+    }
+
+    /**
      * Create Boss Panel (integrated from BossTesting.js)
      */
     createBossPanel(container) {
@@ -933,7 +1012,7 @@ export class DebugPanel {
             // Ctrl + Number - Jump to panel
             if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
                 const panelIndex = parseInt(e.key) - 1;
-                const panels = ['player-stats', 'enemy-spawn', 'relic-control', 'gem-coins', 'abilities', 'game-state', 'boss', 'diagnostics'];
+                const panels = ['player-stats', 'enemy-spawn', 'relic-control', 'gem-coins', 'abilities', 'game-state', 'ball-physics', 'boss', 'diagnostics'];
                 if (panelIndex < panels.length) {
                     const panelId = panels[panelIndex];
                     if (!this.expandedPanels.has(panelId)) {

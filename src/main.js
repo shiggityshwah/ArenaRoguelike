@@ -41,6 +41,7 @@ import {
 import enemyPrototypes from './config/enemyTypes.js';
 import gemTypes from './config/gemTypes.js';
 import relicInfo from './config/relicInfo.js';
+import { CAMERA_CONFIG } from './config/physicsConstants.js';
 
 // ===== Manager Imports =====
 import ObjectPool from './managers/ObjectPool.js';
@@ -83,6 +84,8 @@ import {
 } from './systems/effects.js';
 import { createPlayerAbilitySystem, ABILITY_DEFINITIONS } from './systems/playerAbilities.js';
 import { createWaveManager } from './systems/waveManager.js';
+import { createTiltPhysicsSystem } from './systems/tiltPhysics.js';
+import { createBallCollisionSystem } from './systems/ballCollision.js';
 
 // ===== Utility Imports =====
 import { TrailRenderer } from './utils/TrailRenderer.js';
@@ -188,6 +191,8 @@ const playerMaterial = new THREE.MeshStandardMaterial({
 const playerCone = new THREE.Mesh(playerGeometry, playerMaterial);
 playerCone.position.set(0, 2, 5);
 playerCone.castShadow = true;
+// Hide the player cone - ball mesh will be used instead
+playerCone.visible = false;
 scene.add(playerCone);
 
 // Add point light to player cone for glow effect
@@ -423,6 +428,17 @@ const combatSystem = createCombatSystem({
     }
 });
 
+// ===== Tilt Physics System =====
+const tiltPhysics = createTiltPhysicsSystem({
+    scene,
+    groundPlane: ground
+});
+
+// ===== Ball Collision System =====
+const ballCollision = createBallCollisionSystem({
+    tiltPhysics
+});
+
 // ===== Relic Combat Strategies =====
 const relicCombatStrategies = createRelicCombatStrategies({
     scene,
@@ -560,31 +576,31 @@ if (DEV_MODE) {
  * Updates player position based on input
  */
 function updatePlayerMovement(delta) {
-    const movement = new THREE.Vector2();
+    // Get tilt input from input system
+    const tiltInput = inputSystem.getTiltInput();
 
-    // Keyboard movement
-    const keyMovement = inputSystem.getKeyboardMovement();
-    movement.add(keyMovement);
+    // Update ground tilt based on input
+    tiltPhysics.updateTilt(tiltInput, delta);
 
-    // Drag movement
-    if (inputSystem.isDragging()) {
-        const dragDir = inputSystem.movementDirection.clone();
-        movement.x += dragDir.x;
-        movement.y += dragDir.y;
-    }
+    // Update ball physics (velocity, position, rotation)
+    tiltPhysics.updateBallPhysics(delta);
 
-    if (movement.length() > 0) {
-        movement.normalize();
-        const speed = BASE_PLAYER_SPEED * playerBuffs.moveSpeedMult * delta * 60;
-        playerCone.position.x += movement.x * speed;
-        playerCone.position.z += movement.y * speed;
+    // Check and handle collisions (walls, enemies)
+    ballCollision.update({
+        enemies,
+        relics,
+        gems,
+        coins
+    });
 
-        // Keep player in bounds
-        playerCone.position.x = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, playerCone.position.x));
-        playerCone.position.z = Math.max(-ARENA_PLAYABLE_HALF_SIZE, Math.min(ARENA_PLAYABLE_HALF_SIZE, playerCone.position.z));
+    // Sync playerCone position to ball position for compatibility with existing systems
+    const ballPos = tiltPhysics.getBallPosition();
+    playerCone.position.copy(ballPos);
 
-        // Rotate player to face movement direction
-        const angle = Math.atan2(movement.x, movement.y);
+    // Rotate playerCone to face movement direction (for compatibility)
+    const velocity = tiltPhysics.getBallVelocity();
+    if (velocity.length() > 0.1) {
+        const angle = Math.atan2(velocity.x, velocity.y);
         playerCone.rotation.y = angle;
     }
 }
@@ -1613,13 +1629,36 @@ function updatePlayerHitAnimation(delta) {
 }
 
 /**
- * Updates camera position smoothly
+ * Updates camera position smoothly with dampened tilt follow
  */
 function updateCamera() {
-    // Follow player
+    // Follow player (ball position)
     camera.position.x = playerCone.position.x;
     camera.position.z = playerCone.position.z + targetZoom;
     camera.position.y = targetZoom;
+
+    // Apply dampened tilt to camera
+    const tiltAngle = tiltPhysics.getTiltAngle();
+    const tiltDirection = tiltPhysics.getTiltDirection();
+
+    if (tiltAngle > 0.1) { // Only apply if tilt is significant
+        const dampedAngle = tiltAngle * CAMERA_CONFIG.cameraTiltFactor;
+        const angleRad = dampedAngle * (Math.PI / 180);
+
+        // Calculate rotation axis perpendicular to tilt direction
+        const rotationAxis = new THREE.Vector3(
+            -tiltDirection.y,
+            0,
+            tiltDirection.x
+        ).normalize();
+
+        // Reset camera rotation first
+        camera.rotation.set(0, 0, 0);
+
+        // Apply dampened tilt rotation
+        camera.rotateOnAxis(rotationAxis, angleRad);
+    }
+
     camera.lookAt(playerCone.position);
 }
 
@@ -2139,6 +2178,9 @@ function resetGame() {
     playerCone.scale.set(1, 1, 1);
     playerCone.rotation.set(0, 0, 0);
 
+    // Reset ball physics
+    tiltPhysics.resetBall();
+
     // Reset player material colors
     playerCone.material.color.copy(playerConeOriginalColor);
     playerCone.material.emissive.setHex(0x00ff00);
@@ -2542,6 +2584,8 @@ if (DEV_MODE) {
         // Systems
         abilitySystem: playerAbilitySystem,
         waveManager: waveManager,
+        tiltPhysics: tiltPhysics,
+        ballCollision: ballCollision,
 
         // Config
         enemyPrototypes,
